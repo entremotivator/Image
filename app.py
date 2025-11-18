@@ -7,16 +7,22 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 
-# PIL
+# PIL (safe import)
 try:
     from PIL import Image as PILImage
-except ImportError:
-    import PIL.Image as PILImage
+except Exception:
+    PILImage = None
 
-# Google Drive
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+# Google Drive (safe import)
+try:
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseUpload
+except Exception:
+    service_account = None
+    build = None
+    MediaIoBaseUpload = None
+
 
 # ============================================================================
 # Streamlit Cloud Configuration
