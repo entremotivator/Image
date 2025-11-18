@@ -6,11 +6,14 @@ import io
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
+
+# PIL
 try:
     from PIL import Image as PILImage
 except ImportError:
     import PIL.Image as PILImage
-# Google Drive imports
+
+# Google Drive
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
