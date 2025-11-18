@@ -3,14 +3,13 @@ import requests
 import json
 import time
 import io
+import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 try:
     from PIL import Image as PILImage
 except ImportError:
     import PIL.Image as PILImage
-import numpy as np
-
 # Google Drive imports
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
