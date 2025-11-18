@@ -186,6 +186,121 @@ BASE_URL = "https://api.kie.ai/api/v1/jobs"
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # ============================================================================
+# Prompt Library Data
+# ============================================================================
+
+PROMPT_LIBRARY = {
+    "E-commerce Mockups": [
+        "Product photo of a white t-shirt on wooden table, studio lighting, 4K",
+        "Professional coffee mug mockup on desk with laptop, morning light",
+        "Phone case mockup with marble background, clean and minimal",
+        "Tote bag mockup held by person in urban setting, lifestyle photo",
+        "Water bottle mockup on gym floor with workout equipment",
+        "Notebook mockup on wooden desk with coffee and plants, flat lay",
+        "Hoodie mockup on model, street photography style, urban background",
+        "Sneaker product photo on white background, studio lighting, commercial",
+        "Watch mockup on wrist, luxury lifestyle photography",
+        "Backpack mockup in outdoor hiking setting, adventure lifestyle",
+        "Canvas print mockup on living room wall, interior design",
+        "Laptop skin mockup on modern MacBook, workspace setting",
+        "Pillow mockup on modern sofa, home decor photography",
+        "Baseball cap mockup worn by person, outdoor sunny day",
+        "Wine bottle mockup on restaurant table, elegant dining setting",
+        "Book cover mockup on coffee table with reading glasses",
+        "Yoga mat mockup in fitness studio, wellness lifestyle",
+        "Sunglasses mockup on marble surface, luxury product photo",
+        "Ceramic mug mockup with autumn leaves background, cozy aesthetic",
+        "Tote bag mockup at beach setting, summer vacation vibes",
+        "Poster mockup in modern office space, corporate environment",
+        "Phone mockup showing app interface, hand holding device",
+        "Packaging box mockup with eco-friendly design, sustainable brand",
+        "Gift card mockup on festive background, holiday season",
+        "Shopping bag mockup on city street, retail photography"
+    ],
+    "Backgrounds": [
+        "Abstract gradient background, purple to blue, smooth transitions",
+        "Minimalist white marble texture, luxury aesthetic, high resolution",
+        "Wooden desk texture, natural oak, warm tones, top view",
+        "Bokeh lights background, golden hour, dreamy atmosphere",
+        "Geometric pattern background, modern design, pastel colors",
+        "Watercolor texture background, soft pink and peach tones",
+        "Dark concrete wall texture, industrial aesthetic, moody lighting",
+        "Tropical leaves pattern, vibrant green, summer vibes",
+        "Night sky with stars, deep space, cosmic background",
+        "Soft fabric texture, linen material, neutral beige color",
+        "Urban brick wall, graffiti-free, textured surface, natural light",
+        "Beach sand texture, fine grain, warm sunlight, vacation mood",
+        "Abstract paint splatter, artistic chaos, vibrant colors",
+        "Minimalist gradient, soft pastel, calm and serene",
+        "Gold foil texture, metallic sheen, luxury background",
+        "Forest landscape background, misty morning, ethereal atmosphere",
+        "Mountain range silhouette, sunset colors, majestic view",
+        "Ocean waves from above, turquoise water, peaceful scene",
+        "Desert dunes, golden sand, warm lighting, vast landscape",
+        "City skyline at night, skyscraper lights, urban energy",
+        "Vintage paper texture, aged and weathered, nostalgic feel",
+        "Rainbow holographic background, iridescent effect, modern aesthetic",
+        "Snowy landscape, winter wonderland, pristine white",
+        "Autumn forest path, fallen leaves, warm color palette",
+        "Cherry blossom trees, spring bloom, soft pink petals"
+    ],
+    "Image Edits": [
+        "Make the image more vibrant and increase color saturation",
+        "Add cinematic color grading with teal and orange tones",
+        "Remove background and make it transparent or white",
+        "Add dramatic lighting with golden hour glow",
+        "Make the image look like a professional magazine photo",
+        "Add vintage film effect with grain and faded colors",
+        "Enhance details and sharpness, make it ultra crisp",
+        "Add motion blur effect to create sense of movement",
+        "Make the image black and white with high contrast",
+        "Add bokeh effect to background, blur everything except subject",
+        "Make colors more muted and pastel for soft aesthetic",
+        "Add neon glow effect around the main subject",
+        "Transform to look like an oil painting, artistic style",
+        "Add snow or rain effect to the scene",
+        "Make the image look like taken with vintage Polaroid camera",
+        "Add lens flare and sun rays for dramatic effect",
+        "Enhance shadows and highlights for HDR look",
+        "Add warm sunset lighting to the entire scene",
+        "Make it look like a comic book or graphic novel",
+        "Add sparkles and magical glow effects",
+        "Transform to cyberpunk aesthetic with neon colors",
+        "Add fog or mist for mysterious atmosphere",
+        "Make colors pop like Instagram filter, highly saturated",
+        "Add vignette effect, darken edges around image",
+        "Transform to look like a watercolor painting"
+    ],
+    "Professional Position Changes": [
+        "Change person's position to standing confidently with arms crossed",
+        "Make subject sitting at desk working on laptop, professional pose",
+        "Position person giving presentation, pointing at screen",
+        "Change pose to casual lean against wall, relaxed stance",
+        "Make subject walking forward with confident stride",
+        "Position in thoughtful pose, hand on chin, looking up",
+        "Change to handshake pose, professional greeting",
+        "Make person sitting in director's chair, legs crossed",
+        "Position arms gesturing while speaking, dynamic pose",
+        "Change to power pose, hands on hips, confident stance",
+        "Make subject holding coffee mug, casual professional",
+        "Position person looking at documents, focused expression",
+        "Change to sitting on edge of desk, approachable pose",
+        "Make person using tablet device, modern professional",
+        "Position in video call pose, looking at camera smiling",
+        "Change to standing by window, contemplative pose",
+        "Make subject writing on whiteboard, teaching position",
+        "Position arms behind back, formal authoritative stance",
+        "Change to casual sitting pose, one leg crossed over knee",
+        "Make person adjusting tie or suit jacket, polished look",
+        "Position holding folder or briefcase, ready for meeting",
+        "Change to relaxed pose in modern office chair",
+        "Make subject pointing forward, leadership gesture",
+        "Position with one hand in pocket, casual confident",
+        "Change to welcoming gesture with open arms"
+    ]
+}
+
+# ============================================================================
 # Session State Initialization
 # ============================================================================
 
@@ -221,7 +336,15 @@ def init_session_state():
         'library_filter_type': 'all',  # all, png, jpg, webp
         'selected_images': [],  # for batch operations
         'show_image_modal': False,
-        'modal_image_data': None
+        'modal_image_data': None,
+        'custom_prompts': {
+            "E-commerce Mockups": [],
+            "Backgrounds": [],
+            "Image Edits": [],
+            "Professional Position Changes": []
+        },
+        'selected_prompt_category': "E-commerce Mockups",
+        'prompt_library_search': ''
     }
     
     for key, value in defaults.items():
@@ -651,6 +774,10 @@ with st.sidebar:
         st.session_state.current_page = "Library"
         st.rerun()
     
+    if st.button("💬 Prompt Library", use_container_width=True):
+        st.session_state.current_page = "Prompt Library"
+        st.rerun()
+    
     if st.button("🗑️ Clear History", use_container_width=True):
         if st.checkbox("Confirm clear history"):
             st.session_state.task_history = []
@@ -664,8 +791,140 @@ with st.sidebar:
 # Main Application Pages
 # ============================================================================
 
+def display_prompt_library_page():
+    """Display and manage prompt library."""
+    st.title("📚 Prompt Library")
+    
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("⬅️ Back to Generate", use_container_width=True):
+            st.session_state.current_page = "Generate"
+            st.rerun()
+    
+    with col2:
+        st.markdown("Browse and manage your prompt templates for faster generation")
+    
+    st.markdown("---")
+    
+    # Category tabs
+    categories = list(PROMPT_LIBRARY.keys())
+    selected_tab = st.selectbox("📂 Select Category", categories, 
+                                 index=categories.index(st.session_state.selected_prompt_category))
+    st.session_state.selected_prompt_category = selected_tab
+    
+    # Search box
+    search_query = st.text_input("🔍 Search prompts", 
+                                 value=st.session_state.prompt_library_search,
+                                 placeholder="Type to search prompts...")
+    st.session_state.prompt_library_search = search_query
+    
+    st.markdown("---")
+    
+    # Get prompts for selected category
+    default_prompts = PROMPT_LIBRARY[selected_tab]
+    custom_prompts = st.session_state.custom_prompts.get(selected_tab, [])
+    all_prompts = default_prompts + custom_prompts
+    
+    # Filter prompts by search
+    if search_query:
+        filtered_prompts = [p for p in all_prompts if search_query.lower() in p.lower()]
+    else:
+        filtered_prompts = all_prompts
+    
+    # Display prompt count
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Prompts", len(all_prompts))
+    with col2:
+        st.metric("Default Prompts", len(default_prompts))
+    with col3:
+        st.metric("Custom Prompts", len(custom_prompts))
+    
+    st.markdown("---")
+    
+    # Add custom prompt section
+    with st.expander("➕ Add Custom Prompt", expanded=False):
+        with st.form(f"add_prompt_form_{selected_tab}"):
+            new_prompt = st.text_area("Enter your custom prompt", 
+                                      placeholder="e.g., Professional headshot with blue background",
+                                      height=100)
+            
+            if st.form_submit_button("Add to Library", use_container_width=True):
+                if new_prompt.strip():
+                    if selected_tab not in st.session_state.custom_prompts:
+                        st.session_state.custom_prompts[selected_tab] = []
+                    
+                    st.session_state.custom_prompts[selected_tab].append(new_prompt.strip())
+                    st.success(f"✅ Added prompt to {selected_tab}!")
+                    st.rerun()
+                else:
+                    st.warning("Please enter a prompt")
+    
+    st.markdown("---")
+    st.markdown(f"### {selected_tab} ({len(filtered_prompts)} prompts)")
+    
+    # Display prompts
+    if not filtered_prompts:
+        st.info("No prompts found matching your search.")
+    else:
+        for i, prompt in enumerate(filtered_prompts):
+            is_custom = prompt in custom_prompts
+            
+            with st.container():
+                st.markdown("""
+                <div style='background: white; padding: 15px; border-radius: 10px; 
+                            border: 2px solid #e0e0e0; margin-bottom: 15px;
+                            box-shadow: 0 2px 8px rgba(0,0,0,0.05);'>
+                """, unsafe_allow_html=True)
+                
+                col1, col2 = st.columns([4, 1])
+                
+                with col1:
+                    badge_color = "#FFA500" if is_custom else "#4CAF50"
+                    badge_text = "CUSTOM" if is_custom else "DEFAULT"
+                    st.markdown(f"""
+                    <span style='background:{badge_color}; color:white; padding:3px 10px; 
+                                 border-radius:12px; font-size:10px; font-weight:bold; 
+                                 margin-right:10px;'>{badge_text}</span>
+                    <span style='font-size:14px; color:#333;'>{prompt}</span>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    btn_col1, btn_col2, btn_col3 = st.columns(3)
+                    
+                    with btn_col1:
+                        if st.button("📋", key=f"copy_{selected_tab}_{i}", 
+                                   help="Copy to clipboard", use_container_width=True):
+                            st.code(prompt, language=None)
+                            st.success("Copied!")
+                    
+                    with btn_col2:
+                        if st.button("✏️", key=f"use_{selected_tab}_{i}", 
+                                   help="Use this prompt", use_container_width=True):
+                            st.session_state.selected_prompt_for_generation = prompt
+                            st.session_state.current_page = "Generate"
+                            st.success("Prompt selected! Redirecting...")
+                            time.sleep(1)
+                            st.rerun()
+                    
+                    with btn_col3:
+                        if is_custom:
+                            if st.button("🗑️", key=f"delete_{selected_tab}_{i}", 
+                                       help="Delete custom prompt", use_container_width=True):
+                                st.session_state.custom_prompts[selected_tab].remove(prompt)
+                                st.success("Deleted!")
+                                st.rerun()
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+
 def display_generate_page():
     st.title("✨ Generate New Image")
+    
+    if 'selected_prompt_for_generation' in st.session_state and st.session_state.get('selected_prompt_for_generation'):
+        st.success(f"📋 Using prompt from library: {st.session_state.selected_prompt_for_generation[:60]}...")
+        if st.button("❌ Clear Selected Prompt"):
+            st.session_state.selected_prompt_for_generation = None
+            st.rerun()
     
     if st.session_state.selected_image_for_edit and st.session_state.edit_mode:
         st.info(f"📷 Image selected for editing: {st.session_state.selected_image_for_edit.get('name', 'Unknown')}")
@@ -683,8 +942,16 @@ def display_generate_page():
     with tab1:
         st.header("Text-to-Image Generation")
         
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            if st.button("📚 Browse Prompt Library", use_container_width=True):
+                st.session_state.current_page = "Prompt Library"
+                st.rerun()
+        
         with st.form("text_to_image_form"):
-            prompt = st.text_area("Prompt", "A photorealistic image of a majestic lion wearing a crown, digital art, highly detailed")
+            default_prompt = st.session_state.get('selected_prompt_for_generation', 
+                                                  "A photorealistic image of a majestic lion wearing a crown, digital art, highly detailed")
+            prompt = st.text_area("Prompt", default_prompt)
             negative_prompt = st.text_area("Negative Prompt (Optional)", "blurry, low quality, bad anatomy")
             
             col1, col2, col3 = st.columns(3)
@@ -700,6 +967,9 @@ def display_generate_page():
             submitted = st.form_submit_button("Generate Image")
             
             if submitted:
+                if 'selected_prompt_for_generation' in st.session_state:
+                    st.session_state.selected_prompt_for_generation = None
+                
                 input_params = {
                     "prompt": prompt,
                     "negative_prompt": negative_prompt,
@@ -1493,6 +1763,8 @@ elif st.session_state.current_page == "History":
     display_history_page()
 elif st.session_state.current_page == "Library":
     display_library_page()
+elif st.session_state.current_page == "Prompt Library":
+    display_prompt_library_page()
 else:
     st.session_state.current_page = "Generate"
     st.rerun()
