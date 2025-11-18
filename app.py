@@ -156,7 +156,9 @@ def init_session_state():
             'total_images': 0,
             'uploaded_images': 0
         },
-        'current_page': "Generate"
+        'current_page': "Generate",
+        'selected_image_for_edit': None,
+        'edit_mode': None  # Can be 'qwen' or 'seedream'
     }
     
     for key, value in defaults.items():
@@ -602,6 +604,13 @@ with st.sidebar:
 def display_generate_page():
     st.title("✨ Generate New Image")
     
+    if st.session_state.selected_image_for_edit and st.session_state.edit_mode:
+        st.info(f"📷 Image selected for editing: {st.session_state.selected_image_for_edit.get('name', 'Unknown')}")
+        if st.button("❌ Clear Selection"):
+            st.session_state.selected_image_for_edit = None
+            st.session_state.edit_mode = None
+            st.rerun()
+    
     if not st.session_state.api_key:
         st.error("Please configure your API Key in the sidebar to start generating images.")
         return
@@ -660,11 +669,32 @@ def display_generate_page():
         st.header("Image Edit - Qwen Model")
         st.info("Edit images using the Qwen Image Edit model")
         
+        default_qwen_url = st.session_state.selected_image_for_edit.get('public_image_url', 
+            "https://file.aiquickdraw.com/custom-page/akr/section-images/1755603225969i6j87xnw.jpg") if st.session_state.selected_image_for_edit else "https://file.aiquickdraw.com/custom-page/akr/section-images/1755603225969i6j87xnw.jpg"
+        
         with st.form("qwen_image_edit_form"):
             prompt = st.text_area("Edit Prompt", "Make the image more vibrant and colorful", key="qwen_prompt")
             negative_prompt = st.text_area("Negative Prompt (Optional)", "blurry, ugly", key="qwen_neg_prompt")
             
-            image_url = st.text_input("Image URL", "https://file.aiquickdraw.com/custom-page/akr/section-images/1755603225969i6j87xnw.jpg", key="qwen_image_url")
+            if st.session_state.authenticated and st.session_state.library_images:
+                use_library_image = st.checkbox("📚 Use image from library", value=bool(st.session_state.selected_image_for_edit))
+                
+                if use_library_image:
+                    library_options = {img.get('name', f"Image {i}"): img for i, img in enumerate(st.session_state.library_images)}
+                    # Ensure a default selected image if available
+                    default_selection_name = st.session_state.selected_image_for_edit.get('name') if st.session_state.selected_image_for_edit else None
+                    if default_selection_name not in library_options:
+                         default_selection_name = list(library_options.keys())[0] if library_options else ""
+
+                    selected_name = st.selectbox("Select Image", options=list(library_options.keys()), 
+                                                key="qwen_library_select", index=list(library_options.keys()).index(default_selection_name) if default_selection_name in library_options else 0)
+                    selected_img = library_options[selected_name]
+                    image_url = selected_img.get('public_image_url', '')
+                    st.image(image_url, caption=selected_name, width=200)
+                else:
+                    image_url = st.text_input("Image URL", default_qwen_url, key="qwen_image_url")
+            else:
+                image_url = st.text_input("Image URL", default_qwen_url, key="qwen_image_url")
             
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -707,6 +737,8 @@ def display_generate_page():
                         "results": []
                     })
                     st.session_state.current_task = task_id
+                    st.session_state.selected_image_for_edit = None
+                    st.session_state.edit_mode = None
                     st.rerun()
                 else:
                     st.error(f"Failed to create task: {result['error']}")
@@ -715,10 +747,31 @@ def display_generate_page():
         st.header("Image Edit - Seedream V4 Model")
         st.info("Advanced image editing using Seedream V4 with multiple image inputs")
         
+        default_seedream_url = st.session_state.selected_image_for_edit.get('public_image_url',
+            "https://file.aiquickdraw.com/custom-page/akr/section-images/1757930552966e7f2on7s.png") if st.session_state.selected_image_for_edit else "https://file.aiquickdraw.com/custom-page/akr/section-images/1757930552966e7f2on7s.png"
+        
         with st.form("seedream_image_edit_form"):
             prompt = st.text_area("Edit Prompt", "Create a tshirt mock up with this logo", key="seedream_prompt")
             
-            image_url = st.text_input("Image URL", "https://file.aiquickdraw.com/custom-page/akr/section-images/1757930552966e7f2on7s.png", key="seedream_image_url")
+            if st.session_state.authenticated and st.session_state.library_images:
+                use_library_image = st.checkbox("📚 Use image from library", value=bool(st.session_state.selected_image_for_edit))
+                
+                if use_library_image:
+                    library_options = {img.get('name', f"Image {i}"): img for i, img in enumerate(st.session_state.library_images)}
+                    # Ensure a default selected image if available
+                    default_selection_name = st.session_state.selected_image_for_edit.get('name') if st.session_state.selected_image_for_edit else None
+                    if default_selection_name not in library_options:
+                         default_selection_name = list(library_options.keys())[0] if library_options else ""
+
+                    selected_name = st.selectbox("Select Image", options=list(library_options.keys()),
+                                                key="seedream_library_select", index=list(library_options.keys()).index(default_selection_name) if default_selection_name in library_options else 0)
+                    selected_img = library_options[selected_name]
+                    image_url = selected_img.get('public_image_url', '')
+                    st.image(image_url, caption=selected_name, width=200)
+                else:
+                    image_url = st.text_input("Image URL", default_seedream_url, key="seedream_image_url")
+            else:
+                image_url = st.text_input("Image URL", default_seedream_url, key="seedream_image_url")
             
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -755,6 +808,8 @@ def display_generate_page():
                         "results": []
                     })
                     st.session_state.current_task = task_id
+                    st.session_state.selected_image_for_edit = None
+                    st.session_state.edit_mode = None
                     st.rerun()
                 else:
                     st.error(f"Failed to create task: {result['error']}")
@@ -888,16 +943,17 @@ def display_library_page():
         st.error("Please connect your Google Drive Service Account in the sidebar to view the library.")
         return
     
-    if not st.session_state.library_images:
+    with st.spinner("Loading images from Google Drive..."):
         st.session_state.library_images = list_gdrive_images()
     
     if not st.session_state.library_images:
-        st.info("Your Google Drive folder is empty.")
+        st.info("Your Google Drive folder is empty. Start generating images to populate your library!")
         return
     
     valid_images = [img for img in st.session_state.library_images if img and 'name' in img and 'id' in img]
     
     st.markdown(f"Found **{len(valid_images)}** images in your Drive folder.")
+    st.markdown("---")
     
     cols_per_row = 3
     
@@ -917,25 +973,42 @@ def display_library_page():
                 try:
                     st.image(public_image_url, use_column_width=True)
                 except Exception as e:
-                    st.warning(f"Could not load image: {str(e)}")
-                    st.markdown(f"[View on Drive]({web_link})")
+                    st.warning("⚠️ Image preview unavailable")
+                    st.markdown(f"[Open in Drive]({web_link})")
             else:
                 st.info("Image preview not available")
-                st.markdown(f"[View on Drive]({web_link})")
+                st.markdown(f"[Open in Drive]({web_link})")
             
-            if st.button("🔗 Open in Drive", key=f"open_{file_id}", use_container_width=True):
-                st.markdown(f"[Click here to open]({web_link})")
-            
-            # Delete button
-            if st.button("🗑️ Delete", key=f"delete_{file_id}", use_container_width=True):
-                if delete_gdrive_file(file_id):
-                    st.success(f"Deleted {file_name}")
-                    st.session_state.library_images = [img for img in st.session_state.library_images if img.get('id') != file_id]
+            edit_col1, edit_col2 = st.columns(2)
+            with edit_col1:
+                if st.button("✏️ Edit (Qwen)", key=f"edit_qwen_{file_id}", use_container_width=True):
+                    st.session_state.selected_image_for_edit = file_info
+                    st.session_state.edit_mode = 'qwen'
+                    st.session_state.current_page = "Generate"
                     st.rerun()
-                else:
-                    st.error("Failed to delete file.")
-        
-        if (i + 1) % cols_per_row == 0:
+            
+            with edit_col2:
+                if st.button("🎨 Edit (Seedream)", key=f"edit_seedream_{file_id}", use_container_width=True):
+                    st.session_state.selected_image_for_edit = file_info
+                    st.session_state.edit_mode = 'seedream'
+                    st.session_state.current_page = "Generate"
+                    st.rerun()
+            
+            btn_col1, btn_col2 = st.columns(2)
+            with btn_col1:
+                if st.button("🔗 Open in Drive", key=f"open_{file_id}", use_container_width=True):
+                    st.markdown(f"[Click here to open]({web_link})")
+            
+            with btn_col2:
+                if st.button("🗑️ Delete", key=f"delete_{file_id}", use_container_width=True):
+                    with st.spinner(f"Deleting {file_name}..."):
+                        if delete_gdrive_file(file_id):
+                            st.success(f"✅ Deleted {file_name}")
+                            st.session_state.library_images = [img for img in st.session_state.library_images if img.get('id') != file_id]
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to delete file.")
+            
             st.markdown("---")
 
 # ============================================================================
