@@ -94,17 +94,18 @@ st.markdown("""
     }
     .image-card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.15);
         border-color: #4CAF50;
     }
     .image-container {
         position: relative;
         width: 100%;
         padding-bottom: 75%;
-        background: #f5f5f5;
+        background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
         border-radius: 8px;
         overflow: hidden;
         margin-bottom: 12px;
+        cursor: pointer;
     }
     .image-container img {
         position: absolute;
@@ -113,6 +114,10 @@ st.markdown("""
         width: 100%;
         height: 100%;
         object-fit: cover;
+        transition: transform 0.3s ease;
+    }
+    .image-container:hover img {
+        transform: scale(1.05);
     }
     .image-placeholder {
         position: absolute;
@@ -121,6 +126,7 @@ st.markdown("""
         transform: translate(-50%, -50%);
         text-align: center;
         color: #999;
+        font-size: 14px;
     }
     .status-badge {
         display: inline-block;
@@ -140,6 +146,34 @@ st.markdown("""
     .status-fail {
         background-color: #dc3545;
         color: white;
+    }
+    .filter-panel {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+        border: 1px solid #dee2e6;
+    }
+    .view-toggle {
+        display: flex;
+        gap: 10px;
+        margin: 10px 0;
+    }
+    .metadata-badge {
+        display: inline-block;
+        background: #e9ecef;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-size: 11px;
+        margin: 2px;
+        color: #495057;
+    }
+    .image-info {
+        background: #f8f9fa;
+        padding: 10px;
+        border-radius: 6px;
+        margin-top: 8px;
+        font-size: 12px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -180,7 +214,14 @@ def init_session_state():
         },
         'current_page': "Generate",
         'selected_image_for_edit': None,
-        'edit_mode': None
+        'edit_mode': None,
+        'library_view_mode': 'grid',  # grid or list
+        'library_sort_by': 'date_desc',  # date_desc, date_asc, name_asc, name_desc
+        'library_search_query': '',
+        'library_filter_type': 'all',  # all, png, jpg, webp
+        'selected_images': [],  # for batch operations
+        'show_image_modal': False,
+        'modal_image_data': None
     }
     
     for key, value in defaults.items():
@@ -953,9 +994,18 @@ def display_history_page():
 def display_library_page():
     st.title("📚 Google Drive Library")
     
-    if st.button("⬅️ Back to Generate", use_container_width=False):
-        st.session_state.current_page = "Generate"
-        st.rerun()
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("⬅️ Back to Generate", use_container_width=True):
+            st.session_state.current_page = "Generate"
+            st.rerun()
+    
+    with col2:
+        if st.button("🔄 Refresh Library", use_container_width=True):
+            with st.spinner("Refreshing..."):
+                st.session_state.library_images = list_gdrive_images()
+                st.success("Library refreshed!")
+                st.rerun()
     
     st.markdown("---")
     
@@ -964,89 +1014,318 @@ def display_library_page():
         return
     
     with st.spinner("Loading images from Google Drive..."):
-        st.session_state.library_images = list_gdrive_images()
+        if not st.session_state.library_images:
+            st.session_state.library_images = list_gdrive_images()
     
     if not st.session_state.library_images:
         st.info("Your Google Drive folder is empty. Start generating images to populate your library!")
         return
     
     valid_images = [img for img in st.session_state.library_images 
-                   if img and 'name' in img and 'id' in img and 'public_image_url' in img]
+                   if img and 'name' in img and 'id' in img]
     
-    st.markdown(f"Found **{len(valid_images)}** images in your Drive folder.")
+    with st.container():
+        st.markdown("<div class='filter-panel'>", unsafe_allow_html=True)
+        
+        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([2, 1, 1, 1])
+        
+        with filter_col1:
+            search_query = st.text_input("🔍 Search by filename", 
+                                        value=st.session_state.library_search_query,
+                                        placeholder="Type to search...",
+                                        key="library_search")
+            st.session_state.library_search_query = search_query
+        
+        with filter_col2:
+            sort_options = {
+                'date_desc': '📅 Newest First',
+                'date_asc': '📅 Oldest First',
+                'name_asc': '🔤 Name A-Z',
+                'name_desc': '🔤 Name Z-A'
+            }
+            sort_by = st.selectbox("Sort by", 
+                                  options=list(sort_options.keys()),
+                                  format_func=lambda x: sort_options[x],
+                                  index=list(sort_options.keys()).index(st.session_state.library_sort_by),
+                                  key="library_sort")
+            st.session_state.library_sort_by = sort_by
+        
+        with filter_col3:
+            filter_options = {
+                'all': '🖼️ All Types',
+                'png': '🖼️ PNG Only',
+                'jpg': '🖼️ JPG Only',
+                'webp': '🖼️ WebP Only'
+            }
+            filter_type = st.selectbox("Filter", 
+                                      options=list(filter_options.keys()),
+                                      format_func=lambda x: filter_options[x],
+                                      index=list(filter_options.keys()).index(st.session_state.library_filter_type),
+                                      key="library_filter")
+            st.session_state.library_filter_type = filter_type
+        
+        with filter_col4:
+            view_options = {
+                'grid': '⊞ Grid View',
+                'list': '≡ List View'
+            }
+            view_mode = st.selectbox("View", 
+                                    options=list(view_options.keys()),
+                                    format_func=lambda x: view_options[x],
+                                    index=list(view_options.keys()).index(st.session_state.library_view_mode),
+                                    key="library_view")
+            st.session_state.library_view_mode = view_mode
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    filtered_images = valid_images
+    
+    if st.session_state.library_search_query:
+        filtered_images = [img for img in filtered_images 
+                          if st.session_state.library_search_query.lower() in img.get('name', '').lower()]
+    
+    if st.session_state.library_filter_type != 'all':
+        mime_type_map = {
+            'png': 'image/png',
+            'jpg': ['image/jpeg', 'image/jpg'],
+            'webp': 'image/webp'
+        }
+        target_mime = mime_type_map[st.session_state.library_filter_type]
+        if isinstance(target_mime, list):
+            filtered_images = [img for img in filtered_images 
+                             if img.get('mimeType') in target_mime]
+        else:
+            filtered_images = [img for img in filtered_images 
+                             if img.get('mimeType') == target_mime]
+    
+    if st.session_state.library_sort_by == 'date_desc':
+        filtered_images = sorted(filtered_images, 
+                                key=lambda x: x.get('createdTime', ''), 
+                                reverse=True)
+    elif st.session_state.library_sort_by == 'date_asc':
+        filtered_images = sorted(filtered_images, 
+                                key=lambda x: x.get('createdTime', ''))
+    elif st.session_state.library_sort_by == 'name_asc':
+        filtered_images = sorted(filtered_images, 
+                                key=lambda x: x.get('name', '').lower())
+    elif st.session_state.library_sort_by == 'name_desc':
+        filtered_images = sorted(filtered_images, 
+                                key=lambda x: x.get('name', '').lower(), 
+                                reverse=True)
+    
+    st.markdown(f"Showing **{len(filtered_images)}** of **{len(valid_images)}** images")
     st.markdown("---")
     
-    cols_per_row = 3
+    if not filtered_images:
+        st.info("No images match your search criteria.")
+        return
     
-    for i, file_info in enumerate(valid_images):
-        if i % cols_per_row == 0:
-            cols = st.columns(cols_per_row)
+    if st.session_state.library_view_mode == 'grid':
+        cols_per_row = 3
         
-        with cols[i % cols_per_row]:
+        for i, file_info in enumerate(filtered_images):
+            if i % cols_per_row == 0:
+                cols = st.columns(cols_per_row)
+            
+            with cols[i % cols_per_row]:
+                file_name = file_info.get('name', 'Unknown File')
+                web_link = file_info.get('webViewLink', '#')
+                file_id = file_info.get('id', f"no_id_{i}")
+                public_image_url = file_info.get('public_image_url')
+                thumbnail_url = file_info.get('thumbnail_url')
+                direct_link = file_info.get('direct_link')
+                created_time = file_info.get('createdTime', '')
+                file_size = file_info.get('size', 0)
+                mime_type = file_info.get('mimeType', '')
+                
+                with st.container():
+                    st.markdown(f"<div class='image-card'>", unsafe_allow_html=True)
+                    
+                    # Image display with multiple fallback URLs
+                    image_displayed = False
+                    urls_to_try = [
+                        public_image_url,
+                        thumbnail_url,
+                        direct_link
+                    ]
+                    
+                    for url in urls_to_try:
+                        if url and not image_displayed:
+                            try:
+                                st.image(url, use_container_width=True, caption=file_name)
+                                image_displayed = True
+                                break
+                            except Exception:
+                                continue
+                    
+                    if not image_displayed:
+                        st.markdown(f"<div class='image-container'><div class='image-placeholder'>🖼️<br>Preview unavailable<br><a href='{web_link}' target='_blank'>Open in Drive</a></div></div>", unsafe_allow_html=True)
+                    
+                    st.markdown("<div class='image-info'>", unsafe_allow_html=True)
+                    if created_time:
+                        try:
+                            created_date = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
+                            st.markdown(f"<span class='metadata-badge'>📅 {created_date.strftime('%Y-%m-%d %H:%M')}</span>", unsafe_allow_html=True)
+                        except:
+                            pass
+                    
+                    if file_size:
+                        try:
+                            size_kb = int(file_size) / 1024
+                            if size_kb > 1024:
+                                size_str = f"{size_kb/1024:.1f} MB"
+                            else:
+                                size_str = f"{size_kb:.1f} KB"
+                            st.markdown(f"<span class='metadata-badge'>💾 {size_str}</span>", unsafe_allow_html=True)
+                        except:
+                            pass
+                    
+                    if mime_type:
+                        file_ext = mime_type.split('/')[-1].upper()
+                        st.markdown(f"<span class='metadata-badge'>📄 {file_ext}</span>", unsafe_allow_html=True)
+                    
+                    st.markdown("</div>", unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+                    
+                    # Edit buttons
+                    edit_col1, edit_col2 = st.columns(2)
+                    with edit_col1:
+                        if st.button("✏️ Edit (Qwen)", key=f"edit_qwen_{file_id}", use_container_width=True):
+                            st.session_state.selected_image_for_edit = file_info
+                            st.session_state.edit_mode = 'qwen'
+                            st.session_state.current_page = "Generate"
+                            st.rerun()
+                    
+                    with edit_col2:
+                        if st.button("🎨 Edit (Seedream)", key=f"edit_seedream_{file_id}", use_container_width=True):
+                            st.session_state.selected_image_for_edit = file_info
+                            st.session_state.edit_mode = 'seedream'
+                            st.session_state.current_page = "Generate"
+                            st.rerun()
+                    
+                    # Action buttons
+                    btn_col1, btn_col2, btn_col3 = st.columns(3)
+                    with btn_col1:
+                        st.markdown(f"<a href='{web_link}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#4285F4;color:white;border:none;border-radius:6px;cursor:pointer;'>🔗 Drive</button></a>", unsafe_allow_html=True)
+                    
+                    with btn_col2:
+                        if public_image_url:
+                            st.markdown(f"<a href='{public_image_url}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#34A853;color:white;border:none;border-radius:6px;cursor:pointer;'>👁️ View</button></a>", unsafe_allow_html=True)
+                    
+                    with btn_col3:
+                        if st.button("🗑️", key=f"delete_{file_id}", use_container_width=True, help="Delete this image"):
+                            with st.spinner(f"Deleting {file_name}..."):
+                                if delete_gdrive_file(file_id):
+                                    st.success(f"✅ Deleted {file_name}")
+                                    st.session_state.library_images = [img for img in st.session_state.library_images if img.get('id') != file_id]
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to delete file.")
+                    
+                    st.markdown("</div>", unsafe_allow_html=True)
+    
+    else:  # List view
+        for i, file_info in enumerate(filtered_images):
             file_name = file_info.get('name', 'Unknown File')
             web_link = file_info.get('webViewLink', '#')
             file_id = file_info.get('id', f"no_id_{i}")
             public_image_url = file_info.get('public_image_url')
             thumbnail_url = file_info.get('thumbnail_url')
             direct_link = file_info.get('direct_link')
+            created_time = file_info.get('createdTime', '')
+            file_size = file_info.get('size', 0)
+            mime_type = file_info.get('mimeType', '')
             
             with st.container():
                 st.markdown(f"<div class='image-card'>", unsafe_allow_html=True)
-                st.markdown(f"**{file_name}**")
                 
-                # Try multiple URL formats for better compatibility
-                image_displayed = False
-                urls_to_try = [
-                    public_image_url,
-                    thumbnail_url,
-                    direct_link,
-                    web_link
-                ]
+                col1, col2 = st.columns([1, 3])
                 
-                for url in urls_to_try:
-                    if url and not image_displayed:
+                with col1:
+                    # Thumbnail
+                    image_displayed = False
+                    urls_to_try = [thumbnail_url, public_image_url, direct_link]
+                    
+                    for url in urls_to_try:
+                        if url and not image_displayed:
+                            try:
+                                st.image(url, width=150)
+                                image_displayed = True
+                                break
+                            except Exception:
+                                continue
+                    
+                    if not image_displayed:
+                        st.markdown("🖼️ No preview")
+                
+                with col2:
+                    st.markdown(f"### {file_name}")
+                    
+                    # Metadata
+                    metadata_html = ""
+                    if created_time:
                         try:
-                            st.image(url, use_container_width=True)
-                            image_displayed = True
-                            break
-                        except Exception:
-                            continue
-                
-                if not image_displayed:
-                    st.markdown(f"<div class='image-placeholder'>🖼️<br>Preview unavailable</div>", unsafe_allow_html=True)
-                    st.markdown(f"[📎 Open in Drive]({web_link})", unsafe_allow_html=True)
-                
-                st.markdown("---")
-                edit_col1, edit_col2 = st.columns(2)
-                with edit_col1:
-                    if st.button("✏️ Qwen", key=f"edit_qwen_{file_id}", use_container_width=True):
-                        st.session_state.selected_image_for_edit = file_info
-                        st.session_state.edit_mode = 'qwen'
-                        st.session_state.current_page = "Generate"
-                        st.rerun()
-                
-                with edit_col2:
-                    if st.button("🎨 Seedream", key=f"edit_seedream_{file_id}", use_container_width=True):
-                        st.session_state.selected_image_for_edit = file_info
-                        st.session_state.edit_mode = 'seedream'
-                        st.session_state.current_page = "Generate"
-                        st.rerun()
-                
-                btn_col1, btn_col2 = st.columns(2)
-                with btn_col1:
-                    st.markdown(f"[🔗 Drive]({web_link})", unsafe_allow_html=True)
-                
-                with btn_col2:
-                    if st.button("🗑️ Delete", key=f"delete_{file_id}", use_container_width=True):
-                        with st.spinner(f"Deleting {file_name}..."):
-                            if delete_gdrive_file(file_id):
-                                st.success(f"✅ Deleted {file_name}")
-                                st.session_state.library_images = [img for img in st.session_state.library_images if img.get('id') != file_id]
-                                st.rerun()
+                            created_date = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
+                            metadata_html += f"<span class='metadata-badge'>📅 {created_date.strftime('%Y-%m-%d %H:%M')}</span> "
+                        except:
+                            pass
+                    
+                    if file_size:
+                        try:
+                            size_kb = int(file_size) / 1024
+                            if size_kb > 1024:
+                                size_str = f"{size_kb/1024:.1f} MB"
                             else:
-                                st.error("❌ Failed to delete file.")
+                                size_str = f"{size_kb:.1f} KB"
+                            metadata_html += f"<span class='metadata-badge'>💾 {size_str}</span> "
+                        except:
+                            pass
+                    
+                    if mime_type:
+                        file_ext = mime_type.split('/')[-1].upper()
+                        metadata_html += f"<span class='metadata-badge'>📄 {file_ext}</span>"
+                    
+                    st.markdown(metadata_html, unsafe_allow_html=True)
+                    
+                    st.markdown("---")
+                    
+                    # Action buttons in list view
+                    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns(5)
+                    
+                    with btn_col1:
+                        if st.button("✏️ Qwen", key=f"list_edit_qwen_{file_id}", use_container_width=True):
+                            st.session_state.selected_image_for_edit = file_info
+                            st.session_state.edit_mode = 'qwen'
+                            st.session_state.current_page = "Generate"
+                            st.rerun()
+                    
+                    with btn_col2:
+                        if st.button("🎨 Seedream", key=f"list_edit_seedream_{file_id}", use_container_width=True):
+                            st.session_state.selected_image_for_edit = file_info
+                            st.session_state.edit_mode = 'seedream'
+                            st.session_state.current_page = "Generate"
+                            st.rerun()
+                    
+                    with btn_col3:
+                        st.markdown(f"<a href='{web_link}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#4285F4;color:white;border:none;border-radius:6px;cursor:pointer;'>🔗 Drive</button></a>", unsafe_allow_html=True)
+                    
+                    with btn_col4:
+                        if public_image_url:
+                            st.markdown(f"<a href='{public_image_url}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#34A853;color:white;border:none;border-radius:6px;cursor:pointer;'>👁️ View</button></a>", unsafe_allow_html=True)
+                    
+                    with btn_col5:
+                        if st.button("🗑️ Delete", key=f"list_delete_{file_id}", use_container_width=True):
+                            with st.spinner(f"Deleting {file_name}..."):
+                                if delete_gdrive_file(file_id):
+                                    st.success(f"✅ Deleted {file_name}")
+                                    st.session_state.library_images = [img for img in st.session_state.library_images if img.get('id') != file_id]
+                                    st.rerun()
+                                else:
+                                    st.error("❌ Failed to delete file.")
                 
                 st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("---")
 
 # ============================================================================
 # Main Routing
