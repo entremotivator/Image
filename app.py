@@ -346,7 +346,7 @@ def upload_to_gdrive(image_url: str, file_name: str, task_id: str = None):
             'mime_type': file.get('mimeType'),
             'uploaded_at': datetime.now().isoformat(),
             'task_id': task_id,
-            'original_url': image_url,
+            'original_url': image_url,  # Original source URL from generation
             'id': file_id,
             'name': file.get('name')
         }
@@ -1131,9 +1131,12 @@ def display_library_page():
                 file_name = file_info.get('name', 'Unknown File')
                 web_link = file_info.get('webViewLink', '#')
                 file_id = file_info.get('id', f"no_id_{i}")
+                
+                original_url = file_info.get('original_url')  # From resultUrls
                 public_image_url = file_info.get('public_image_url')
                 thumbnail_url = file_info.get('thumbnail_url')
                 direct_link = file_info.get('direct_link')
+                
                 created_time = file_info.get('createdTime', '')
                 file_size = file_info.get('size', 0)
                 mime_type = file_info.get('mimeType', '')
@@ -1141,12 +1144,12 @@ def display_library_page():
                 with st.container():
                     st.markdown(f"<div class='image-card'>", unsafe_allow_html=True)
                     
-                    # Image display with multiple fallback URLs
                     image_displayed = False
                     urls_to_try = [
-                        public_image_url,
-                        thumbnail_url,
-                        direct_link
+                        original_url,  # Original generation URL (highest quality)
+                        public_image_url,  # Google Drive public URL
+                        thumbnail_url,  # Google Drive thumbnail
+                        direct_link  # Google Drive direct link
                     ]
                     
                     for url in urls_to_try:
@@ -1162,6 +1165,13 @@ def display_library_page():
                         st.markdown(f"<div class='image-container'><div class='image-placeholder'>🖼️<br>Preview unavailable<br><a href='{web_link}' target='_blank'>Open in Drive</a></div></div>", unsafe_allow_html=True)
                     
                     st.markdown("<div class='image-info'>", unsafe_allow_html=True)
+                    
+                    if original_url:
+                        st.markdown(f"<a href='{original_url}' target='_blank'><span class='metadata-badge' style='background:#4CAF50;color:white;cursor:pointer;'>🔗 Original</span></a>", unsafe_allow_html=True)
+                    
+                    if public_image_url:
+                        st.markdown(f"<a href='{public_image_url}' target='_blank'><span class='metadata-badge' style='background:#4285F4;color:white;cursor:pointer;'>☁️ Drive</span></a>", unsafe_allow_html=True)
+                    
                     if created_time:
                         try:
                             created_date = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
@@ -1210,8 +1220,9 @@ def display_library_page():
                         st.markdown(f"<a href='{web_link}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#4285F4;color:white;border:none;border-radius:6px;cursor:pointer;'>🔗 Drive</button></a>", unsafe_allow_html=True)
                     
                     with btn_col2:
-                        if public_image_url:
-                            st.markdown(f"<a href='{public_image_url}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#34A853;color:white;border:none;border-radius:6px;cursor:pointer;'>👁️ View</button></a>", unsafe_allow_html=True)
+                        view_url = original_url if original_url else public_image_url
+                        if view_url:
+                            st.markdown(f"<a href='{view_url}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#34A853;color:white;border:none;border-radius:6px;cursor:pointer;'>👁️ View</button></a>", unsafe_allow_html=True)
                     
                     with btn_col3:
                         if st.button("🗑️", key=f"delete_{file_id}", use_container_width=True, help="Delete this image"):
@@ -1230,9 +1241,12 @@ def display_library_page():
             file_name = file_info.get('name', 'Unknown File')
             web_link = file_info.get('webViewLink', '#')
             file_id = file_info.get('id', f"no_id_{i}")
+            
+            original_url = file_info.get('original_url')
             public_image_url = file_info.get('public_image_url')
             thumbnail_url = file_info.get('thumbnail_url')
             direct_link = file_info.get('direct_link')
+            
             created_time = file_info.get('createdTime', '')
             file_size = file_info.get('size', 0)
             mime_type = file_info.get('mimeType', '')
@@ -1243,9 +1257,9 @@ def display_library_page():
                 col1, col2 = st.columns([1, 3])
                 
                 with col1:
-                    # Thumbnail
+                    # Thumbnail - try original first, then Drive thumbnails
                     image_displayed = False
-                    urls_to_try = [thumbnail_url, public_image_url, direct_link]
+                    urls_to_try = [original_url, thumbnail_url, public_image_url, direct_link]
                     
                     for url in urls_to_try:
                         if url and not image_displayed:
@@ -1262,8 +1276,14 @@ def display_library_page():
                 with col2:
                     st.markdown(f"### {file_name}")
                     
+                    link_badges = ""
+                    if original_url:
+                        link_badges += f"<a href='{original_url}' target='_blank'><span class='metadata-badge' style='background:#4CAF50;color:white;cursor:pointer;'>🔗 Original</span></a> "
+                    if public_image_url:
+                        link_badges += f"<a href='{public_image_url}' target='_blank'><span class='metadata-badge' style='background:#4285F4;color:white;cursor:pointer;'>☁️ Drive</span></a> "
+                    
                     # Metadata
-                    metadata_html = ""
+                    metadata_html = link_badges
                     if created_time:
                         try:
                             created_date = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
@@ -1311,8 +1331,9 @@ def display_library_page():
                         st.markdown(f"<a href='{web_link}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#4285F4;color:white;border:none;border-radius:6px;cursor:pointer;'>🔗 Drive</button></a>", unsafe_allow_html=True)
                     
                     with btn_col4:
-                        if public_image_url:
-                            st.markdown(f"<a href='{public_image_url}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#34A853;color:white;border:none;border-radius:6px;cursor:pointer;'>👁️ View</button></a>", unsafe_allow_html=True)
+                        view_url = original_url if original_url else public_image_url
+                        if view_url:
+                            st.markdown(f"<a href='{view_url}' target='_blank' style='text-decoration:none;'><button style='width:100%;padding:8px;background:#34A853;color:white;border:none;border-radius:6px;cursor:pointer;'>👁️ View</button></a>", unsafe_allow_html=True)
                     
                     with btn_col5:
                         if st.button("🗑️ Delete", key=f"list_delete_{file_id}", use_container_width=True):
@@ -1340,3 +1361,4 @@ elif st.session_state.current_page == "Library":
 else:
     st.session_state.current_page = "Generate"
     st.rerun()
+
