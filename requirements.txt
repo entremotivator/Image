@@ -1,7 +1,5 @@
 streamlit==1.28.1
-google-auth-oauthlib==1.1.0
-google-auth-httplib2==0.2.0
-google-api-python-client==2.100.0
+
 pillow
 requests==2.31.0
 python-dotenv==1.0.0
@@ -10,3 +8,9 @@ opencv-python==4.8.1.78
 numpy==1.24.3
 pandas==2.1.3
 PIL.Image
+
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+Pillow
