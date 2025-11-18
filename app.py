@@ -225,7 +225,7 @@ def init_session_state():
     }
     
     for key, value in defaults.items():
-        if key not not in st.session_state:
+        if key not in st.session_state:
             st.session_state[key] = value
 
 init_session_state()
