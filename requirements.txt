@@ -1,12 +1,18 @@
+# Streamlit
+streamlit==1.28.1
+streamlit-image-select==0.6.1
 
-Pillow
+# Core packages
 requests==2.31.0
 python-dotenv==1.0.0
-streamlit-image-select==0.6.1
-opencv-python==4.8.1.78
 numpy==1.24.3
 pandas==2.1.3
+Pillow
 
+# OpenCV
+opencv-python==4.8.1.78
+
+# Google API (required for Google Drive)
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
