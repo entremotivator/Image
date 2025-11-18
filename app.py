@@ -225,7 +225,7 @@ def init_session_state():
     }
     
     for key, value in defaults.items():
-        if key not in st.session_state:
+        if key not not in st.session_state:
             st.session_state[key] = value
 
 init_session_state()
@@ -678,7 +678,7 @@ def display_generate_page():
         st.error("Please configure your API Key in the sidebar to start generating images.")
         return
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Text-to-Image", "Image Edit (Qwen)", "Image Edit (Seedream)", "Advanced"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Text-to-Image", "Image Edit (Qwen)", "Image Edit (Seedream)", "Upload Images", "Advanced"])
 
     with tab1:
         st.header("Text-to-Image Generation")
@@ -876,6 +876,138 @@ def display_generate_page():
                     st.error(f"Failed to create task: {result['error']}")
 
     with tab4:
+        st.header("📤 Upload Your Images")
+        st.info("Upload images from your computer to Google Drive library")
+        
+        if not st.session_state.authenticated:
+            st.warning("⚠️ Please connect your Google Drive account in the sidebar to upload images.")
+        else:
+            uploaded_files = st.file_uploader(
+                "Choose images to upload",
+                type=['png', 'jpg', 'jpeg', 'webp'],
+                accept_multiple_files=True,
+                key="image_uploader"
+            )
+            
+            if uploaded_files:
+                st.markdown(f"**{len(uploaded_files)} file(s) selected**")
+                
+                preview_cols = st.columns(min(len(uploaded_files), 4))
+                for idx, uploaded_file in enumerate(uploaded_files[:4]):
+                    with preview_cols[idx]:
+                        st.image(uploaded_file, caption=uploaded_file.name, use_container_width=True)
+                
+                if len(uploaded_files) > 4:
+                    st.info(f"And {len(uploaded_files) - 4} more file(s)...")
+                
+                if st.button("⬆️ Upload All to Google Drive", type="primary", use_container_width=True):
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    success_count = 0
+                    for idx, uploaded_file in enumerate(uploaded_files):
+                        status_text.text(f"Uploading {uploaded_file.name}... ({idx + 1}/{len(uploaded_files)})")
+                        
+                        try:
+                            folder_id = st.session_state.gdrive_folder_id or create_app_folder()
+                            if not folder_id:
+                                st.error(f"Failed to get folder ID for {uploaded_file.name}")
+                                continue
+                            
+                            image_data = uploaded_file.getvalue()
+                            
+                            mime_type = 'image/png'
+                            if uploaded_file.name.lower().endswith('.jpg') or uploaded_file.name.lower().endswith('.jpeg'):
+                                mime_type = 'image/jpeg'
+                            elif uploaded_file.name.lower().endswith('.webp'):
+                                mime_type = 'image/webp'
+                            
+                            file_metadata = {
+                                'name': uploaded_file.name,
+                                'parents': [folder_id]
+                            }
+                            
+                            media = MediaIoBaseUpload(
+                                io.BytesIO(image_data),
+                                mimetype=mime_type,
+                                resumable=True
+                            )
+                            
+                            file = st.session_state.service.files().create(
+                                body=file_metadata,
+                                media_body=media,
+                                fields='id, name, webViewLink, webContentLink, mimeType, createdTime, size'
+                            ).execute()
+                            
+                            file_id = file.get('id')
+                            
+                            permission = {
+                                'type': 'anyone',
+                                'role': 'reader'
+                            }
+                            st.session_state.service.permissions().create(
+                                fileId=file_id,
+                                body=permission
+                            ).execute()
+                            
+                            public_image_url = f"https://drive.google.com/uc?export=view&id={file_id}"
+                            thumbnail_url = f"https://drive.google.com/thumbnail?id={file_id}&sz=w400"
+                            
+                            upload_info = {
+                                'file_id': file_id,
+                                'file_name': file.get('name'),
+                                'web_link': file.get('webViewLink'),
+                                'content_link': file.get('webContentLink'),
+                                'public_image_url': public_image_url,
+                                'thumbnail_url': thumbnail_url,
+                                'mime_type': file.get('mimeType'),
+                                'uploaded_at': datetime.now().isoformat(),
+                                'task_id': None,
+                                'original_url': public_image_url,
+                                'id': file_id,
+                                'name': file.get('name'),
+                                'createdTime': file.get('createdTime'),
+                                'size': file.get('size'),
+                                'mimeType': file.get('mimeType'),
+                                'thumbnailLink': thumbnail_url,
+                                'direct_link': f"https://lh3.googleusercontent.com/d/{file_id}"
+                            }
+                            
+                            st.session_state.library_images.insert(0, upload_info)
+                            st.session_state.stats['uploaded_images'] += 1
+                            success_count += 1
+                            
+                        except Exception as e:
+                            st.error(f"Error uploading {uploaded_file.name}: {str(e)}")
+                        
+                        progress_bar.progress((idx + 1) / len(uploaded_files))
+                    
+                    progress_bar.empty()
+                    status_text.empty()
+                    
+                    if success_count == len(uploaded_files):
+                        st.success(f"✅ Successfully uploaded all {success_count} image(s) to Google Drive!")
+                    elif success_count > 0:
+                        st.warning(f"⚠️ Uploaded {success_count} of {len(uploaded_files)} image(s)")
+                    else:
+                        st.error("❌ Failed to upload images")
+                    
+                    if success_count > 0:
+                        if st.button("📚 View in Library"):
+                            st.session_state.current_page = "Library"
+                            st.rerun()
+            else:
+                st.info("👆 Click 'Browse files' to select images from your computer")
+                st.markdown("""
+                ### Supported formats:
+                - PNG (.png)
+                - JPEG (.jpg, .jpeg)
+                - WebP (.webp)
+                
+                Upload multiple images at once to quickly populate your library!
+                """)
+
+    with tab5:
         st.header("Advanced Generation Options")
         st.info("Additional generation models and options coming soon!")
         
@@ -1018,9 +1150,12 @@ def display_library_page():
             st.session_state.library_images = list_gdrive_images()
     
     if not st.session_state.library_images:
-        st.info("Your Google Drive folder is empty. Start generating images to populate your library!")
+        st.info("Your Google Drive folder is empty. Start generating images or upload your own images from the 'Upload Images' tab!")
+        if st.button("📤 Go to Upload Tab"):
+            st.session_state.current_page = "Generate"
+            st.rerun()
         return
-    
+
     valid_images = [img for img in st.session_state.library_images 
                    if img and 'name' in img and 'id' in img]
     
@@ -1361,4 +1496,3 @@ elif st.session_state.current_page == "Library":
 else:
     st.session_state.current_page = "Generate"
     st.rerun()
-
