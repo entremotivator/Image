@@ -184,7 +184,7 @@ def init_session_state():
     }
     
     for key, value in defaults.items():
-        if key not in st.session_state:
+        if key not not in st.session_state:
             st.session_state[key] = value
 
 init_session_state()
@@ -909,7 +909,7 @@ def display_history_page():
             
             for j, result_url in enumerate(task['results']):
                 with cols[j]:
-                    st.image(result_url, caption=f"Result {j+1}", use_column_width=True)
+                    st.image(result_url, caption=f"Result {j+1}", use_container_width=True)
                     
                     if st.session_state.authenticated:
                         is_uploaded = any(
@@ -1006,7 +1006,7 @@ def display_library_page():
                 for url in urls_to_try:
                     if url and not image_displayed:
                         try:
-                            st.image(url, use_column_width=True)
+                            st.image(url, use_container_width=True)
                             image_displayed = True
                             break
                         except Exception:
