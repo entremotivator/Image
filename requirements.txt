@@ -12,7 +12,7 @@ Pillow
 # OpenCV
 opencv-python==4.8.1.78
 
-# Google API (pinned for Streamlit Cloud compatibility)
+# Google API (Pinned for Streamlit Cloud)
 google-auth==2.23.4
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.2.0
