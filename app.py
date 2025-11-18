@@ -82,23 +82,45 @@ st.markdown("""
         border-left: 4px solid #17a2b8;
         margin: 10px 0;
     }
-    .image-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-        gap: 20px;
-        margin: 20px 0;
-    }
     .image-card {
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        padding: 10px;
+        border: 2px solid #e0e0e0;
+        border-radius: 12px;
+        padding: 15px;
         background: white;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        transition: transform 0.2s;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        transition: all 0.3s ease;
+        margin-bottom: 20px;
+        height: 100%;
     }
     .image-card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        border-color: #4CAF50;
+    }
+    .image-container {
+        position: relative;
+        width: 100%;
+        padding-bottom: 75%;
+        background: #f5f5f5;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 12px;
+    }
+    .image-container img {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .image-placeholder {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+        color: #999;
     }
     .status-badge {
         display: inline-block;
@@ -158,7 +180,7 @@ def init_session_state():
         },
         'current_page': "Generate",
         'selected_image_for_edit': None,
-        'edit_mode': None  # Can be 'qwen' or 'seedream'
+        'edit_mode': None
     }
     
     for key, value in defaults.items():
@@ -192,7 +214,6 @@ def create_app_folder():
         return None
     
     try:
-        # Search for existing folder
         results = st.session_state.service.files().list(
             q="name='AI_Image_Editor_Pro' and mimeType='application/vnd.google-apps.folder' and trashed=false",
             spaces='drive',
@@ -205,7 +226,6 @@ def create_app_folder():
             st.session_state.gdrive_folder_id = files[0]['id']
             return files[0]['id']
         
-        # Create new folder
         file_metadata = {
             'name': 'AI_Image_Editor_Pro',
             'mimeType': 'application/vnd.google-apps.folder'
@@ -232,28 +252,31 @@ def upload_to_gdrive(image_url: str, file_name: str, task_id: str = None):
         if not folder_id:
             return None
         
-        # Download image from URL
         response = requests.get(image_url, timeout=30)
         response.raise_for_status()
         image_data = response.content
         
-        # Create file metadata
+        mime_type = 'image/png'
+        if file_name.lower().endswith('.jpg') or file_name.lower().endswith('.jpeg'):
+            mime_type = 'image/jpeg'
+        elif file_name.lower().endswith('.webp'):
+            mime_type = 'image/webp'
+        
         file_metadata = {
             'name': file_name,
             'parents': [folder_id]
         }
         
-        # Upload to Google Drive
         media = MediaIoBaseUpload(
             io.BytesIO(image_data),
-            mimetype='image/png',
+            mimetype=mime_type,
             resumable=True
         )
         
         file = st.session_state.service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id, name, webViewLink, webContentLink'
+            fields='id, name, webViewLink, webContentLink, mimeType'
         ).execute()
         
         file_id = file.get('id')
@@ -268,8 +291,8 @@ def upload_to_gdrive(image_url: str, file_name: str, task_id: str = None):
         ).execute()
         
         public_image_url = f"https://drive.google.com/uc?export=view&id={file_id}"
+        thumbnail_url = f"https://drive.google.com/thumbnail?id={file_id}&sz=w400"
         
-        # Update stats
         st.session_state.stats['uploaded_images'] += 1
         
         return {
@@ -277,7 +300,9 @@ def upload_to_gdrive(image_url: str, file_name: str, task_id: str = None):
             'file_name': file.get('name'),
             'web_link': file.get('webViewLink'),
             'content_link': file.get('webContentLink'),
-            'public_image_url': public_image_url,  # Added public image URL
+            'public_image_url': public_image_url,
+            'thumbnail_url': thumbnail_url,
+            'mime_type': file.get('mimeType'),
             'uploaded_at': datetime.now().isoformat(),
             'task_id': task_id,
             'original_url': image_url,
@@ -298,9 +323,9 @@ def list_gdrive_images(folder_id: Optional[str] = None):
             folder_id = st.session_state.gdrive_folder_id or create_app_folder()
         
         results = st.session_state.service.files().list(
-            q=f"'{folder_id}' in parents and trashed=false and (mimeType='image/png' or mimeType='image/jpeg' or mimeType='image/webp')",
+            q=f"'{folder_id}' in parents and trashed=false and (mimeType='image/png' or mimeType='image/jpeg' or mimeType='image/webp' or mimeType='image/jpg')",
             spaces='drive',
-            fields='files(id, name, webContentLink, webViewLink, createdTime, size)',
+            fields='files(id, name, webContentLink, webViewLink, createdTime, size, mimeType, thumbnailLink)',
             pageSize=100,
             orderBy='createdTime desc'
         ).execute()
@@ -308,7 +333,10 @@ def list_gdrive_images(folder_id: Optional[str] = None):
         files = results.get('files', [])
         
         for file in files:
-            file['public_image_url'] = f"https://drive.google.com/uc?export=view&id={file['id']}"
+            file_id = file['id']
+            file['public_image_url'] = f"https://drive.google.com/uc?export=view&id={file_id}"
+            file['thumbnail_url'] = f"https://drive.google.com/thumbnail?id={file_id}&sz=w400"
+            file['direct_link'] = f"https://lh3.googleusercontent.com/d/{file_id}"
         
         return files
     except Exception as e:
@@ -431,7 +459,6 @@ def poll_task_until_complete(api_key, task_id, max_attempts=60, delay=2):
 
 def save_and_upload_results(task_id, model, prompt, result_urls):
     """Save results to history and auto-upload to Google Drive if enabled."""
-    # Update task in history
     for i, task in enumerate(st.session_state.task_history):
         if task['id'] == task_id:
             st.session_state.task_history[i]['status'] = 'success'
@@ -439,7 +466,6 @@ def save_and_upload_results(task_id, model, prompt, result_urls):
             st.session_state.stats['successful_tasks'] += 1
             st.session_state.stats['total_images'] += len(result_urls)
             
-            # Auto-upload to Google Drive if enabled and authenticated
             if st.session_state.authenticated and st.session_state.auto_upload:
                 for j, result_url in enumerate(result_urls):
                     file_name = f"{model.replace('/', '_')}_{task_id}_{j+1}.png"
@@ -497,7 +523,6 @@ with st.sidebar:
     st.markdown("# 🎨 AI Image Editor Pro")
     st.markdown("---")
     
-    # API Configuration
     st.header("⚙️ API Configuration")
     
     api_key_input = st.text_input(
@@ -516,7 +541,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Google Drive Service Account
     st.header("☁️ Google Drive Setup")
     
     if not st.session_state.authenticated:
@@ -559,7 +583,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Statistics
     st.header("📊 Statistics")
     
     stats = st.session_state.stats
@@ -577,7 +600,6 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Quick Actions
     st.header("🚀 Quick Actions")
     
     if st.button("📋 View All Tasks", use_container_width=True):
@@ -681,7 +703,6 @@ def display_generate_page():
                 
                 if use_library_image:
                     library_options = {img.get('name', f"Image {i}"): img for i, img in enumerate(st.session_state.library_images)}
-                    # Ensure a default selected image if available
                     default_selection_name = st.session_state.selected_image_for_edit.get('name') if st.session_state.selected_image_for_edit else None
                     if default_selection_name not in library_options:
                          default_selection_name = list(library_options.keys())[0] if library_options else ""
@@ -758,7 +779,6 @@ def display_generate_page():
                 
                 if use_library_image:
                     library_options = {img.get('name', f"Image {i}"): img for i, img in enumerate(st.session_state.library_images)}
-                    # Ensure a default selected image if available
                     default_selection_name = st.session_state.selected_image_for_edit.get('name') if st.session_state.selected_image_for_edit else None
                     if default_selection_name not in library_options:
                          default_selection_name = list(library_options.keys())[0] if library_options else ""
@@ -950,7 +970,8 @@ def display_library_page():
         st.info("Your Google Drive folder is empty. Start generating images to populate your library!")
         return
     
-    valid_images = [img for img in st.session_state.library_images if img and 'name' in img and 'id' in img]
+    valid_images = [img for img in st.session_state.library_images 
+                   if img and 'name' in img and 'id' in img and 'public_image_url' in img]
     
     st.markdown(f"Found **{len(valid_images)}** images in your Drive folder.")
     st.markdown("---")
@@ -966,50 +987,66 @@ def display_library_page():
             web_link = file_info.get('webViewLink', '#')
             file_id = file_info.get('id', f"no_id_{i}")
             public_image_url = file_info.get('public_image_url')
+            thumbnail_url = file_info.get('thumbnail_url')
+            direct_link = file_info.get('direct_link')
             
-            st.markdown(f"**{file_name}**")
-            
-            if public_image_url:
-                try:
-                    st.image(public_image_url, use_column_width=True)
-                except Exception as e:
-                    st.warning("⚠️ Image preview unavailable")
-                    st.markdown(f"[Open in Drive]({web_link})")
-            else:
-                st.info("Image preview not available")
-                st.markdown(f"[Open in Drive]({web_link})")
-            
-            edit_col1, edit_col2 = st.columns(2)
-            with edit_col1:
-                if st.button("✏️ Edit (Qwen)", key=f"edit_qwen_{file_id}", use_container_width=True):
-                    st.session_state.selected_image_for_edit = file_info
-                    st.session_state.edit_mode = 'qwen'
-                    st.session_state.current_page = "Generate"
-                    st.rerun()
-            
-            with edit_col2:
-                if st.button("🎨 Edit (Seedream)", key=f"edit_seedream_{file_id}", use_container_width=True):
-                    st.session_state.selected_image_for_edit = file_info
-                    st.session_state.edit_mode = 'seedream'
-                    st.session_state.current_page = "Generate"
-                    st.rerun()
-            
-            btn_col1, btn_col2 = st.columns(2)
-            with btn_col1:
-                if st.button("🔗 Open in Drive", key=f"open_{file_id}", use_container_width=True):
-                    st.markdown(f"[Click here to open]({web_link})")
-            
-            with btn_col2:
-                if st.button("🗑️ Delete", key=f"delete_{file_id}", use_container_width=True):
-                    with st.spinner(f"Deleting {file_name}..."):
-                        if delete_gdrive_file(file_id):
-                            st.success(f"✅ Deleted {file_name}")
-                            st.session_state.library_images = [img for img in st.session_state.library_images if img.get('id') != file_id]
-                            st.rerun()
-                        else:
-                            st.error("❌ Failed to delete file.")
-            
-            st.markdown("---")
+            with st.container():
+                st.markdown(f"<div class='image-card'>", unsafe_allow_html=True)
+                st.markdown(f"**{file_name}**")
+                
+                # Try multiple URL formats for better compatibility
+                image_displayed = False
+                urls_to_try = [
+                    public_image_url,
+                    thumbnail_url,
+                    direct_link,
+                    web_link
+                ]
+                
+                for url in urls_to_try:
+                    if url and not image_displayed:
+                        try:
+                            st.image(url, use_column_width=True)
+                            image_displayed = True
+                            break
+                        except Exception:
+                            continue
+                
+                if not image_displayed:
+                    st.markdown(f"<div class='image-placeholder'>🖼️<br>Preview unavailable</div>", unsafe_allow_html=True)
+                    st.markdown(f"[📎 Open in Drive]({web_link})")
+                
+                st.markdown("---")
+                edit_col1, edit_col2 = st.columns(2)
+                with edit_col1:
+                    if st.button("✏️ Qwen", key=f"edit_qwen_{file_id}", use_container_width=True):
+                        st.session_state.selected_image_for_edit = file_info
+                        st.session_state.edit_mode = 'qwen'
+                        st.session_state.current_page = "Generate"
+                        st.rerun()
+                
+                with edit_col2:
+                    if st.button("🎨 Seedream", key=f"edit_seedream_{file_id}", use_container_width=True):
+                        st.session_state.selected_image_for_edit = file_info
+                        st.session_state.edit_mode = 'seedream'
+                        st.session_state.current_page = "Generate"
+                        st.rerun()
+                
+                btn_col1, btn_col2 = st.columns(2)
+                with btn_col1:
+                    st.markdown(f"[🔗 Drive]({web_link})", unsafe_allow_html=True)
+                
+                with btn_col2:
+                    if st.button("🗑️ Delete", key=f"delete_{file_id}", use_container_width=True):
+                        with st.spinner(f"Deleting {file_name}..."):
+                            if delete_gdrive_file(file_id):
+                                st.success(f"✅ Deleted {file_name}")
+                                st.session_state.library_images = [img for img in st.session_state.library_images if img.get('id') != file_id]
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to delete file.")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
 
 # ============================================================================
 # Main Routing
