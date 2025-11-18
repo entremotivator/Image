@@ -7,10 +7,8 @@ streamlit-image-select==0.6.1
 opencv-python==4.8.1.78
 numpy==1.24.3
 pandas==2.1.3
-PIL.Image
 
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
 google-api-python-client
-Pillow
