@@ -3,36 +3,19 @@ import requests
 import json
 import time
 import io
-import numpy as np
 from datetime import datetime
-from typing import Optional, Dict, List
-import base64
+from typing import Optional
 
-# -----------------------------
-# PIL (Safe Import)
-# -----------------------------
-try:
-    from PIL import Image as PILImage
-except Exception:
-    PILImage = None
-    st.error("Pillow is missing. Add 'Pillow' to requirements.txt")
-
-# -----------------------------
-# Google Drive (Safe Import)
-# -----------------------------
+# Google Drive imports
 try:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaIoBaseUpload
 except Exception:
-    service_account = None
-    build = None
-    MediaIoBaseUpload = None
-    st.error("Google API packages missing. Add these to requirements.txt: "
-             "google-auth, google-auth-oauthlib, google-auth-httplib2, google-api-python-client")
+    st.error("Missing Google API packages. Install: google-auth, google-auth-oauthlib, google-auth-httplib2, google-api-python-client")
 
 # ============================================================================
-# Streamlit Configuration
+# Configuration
 # ============================================================================
 
 st.set_page_config(
@@ -45,60 +28,51 @@ st.set_page_config(
 # Custom CSS
 st.markdown("""
 <style>
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
+    .stApp {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        padding: 0 20px;
-    }
-    .image-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: 20px;
-        margin: 20px 0;
+    .main-header {
+        background: white;
+        padding: 2rem;
+        border-radius: 15px;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+        margin-bottom: 2rem;
     }
     .image-card {
-        border: 1px solid #e0e0e0;
-        border-radius: 12px;
-        padding: 12px;
         background: white;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        transition: transform 0.2s, box-shadow 0.2s;
+        border-radius: 12px;
+        padding: 1rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        transition: transform 0.2s;
     }
     .image-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        transform: translateY(-5px);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.2);
     }
-    .image-card img {
-        border-radius: 8px;
-        width: 100%;
-    }
-    .status-badge {
+    .success-badge {
+        background: #10b981;
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-weight: bold;
         display: inline-block;
-        padding: 4px 12px;
-        border-radius: 12px;
-        font-size: 12px;
-        font-weight: 600;
     }
-    .status-success {
-        background-color: #d4edda;
-        color: #155724;
+    .back-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 0.75rem 1.5rem;
+        border-radius: 10px;
+        border: none;
+        font-weight: bold;
+        cursor: pointer;
+        transition: all 0.3s;
     }
-    .status-waiting {
-        background-color: #fff3cd;
-        color: #856404;
-    }
-    .status-fail {
-        background-color: #f8d7da;
-        color: #721c24;
+    .back-button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
     }
 </style>
 """, unsafe_allow_html=True)
-
-# ============================================================================
-# Configuration
-# ============================================================================
 
 BASE_URL = "https://api.kie.ai/api/v1/jobs"
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
@@ -111,22 +85,13 @@ def init_session_state():
     """Initialize all session state variables."""
     defaults = {
         'api_key': "",
-        'task_history': [],
-        'current_task': None,
         'authenticated': False,
         'service': None,
-        'credentials': None,
-        'library_images': [],
         'gdrive_folder_id': None,
-        'auto_upload': True,
+        'library_images': [],
+        'task_history': [],
+        'current_page': "Generate",
         'service_account_info': None,
-        'stats': {
-            'total_tasks': 0,
-            'successful_tasks': 0,
-            'failed_tasks': 0,
-            'uploaded_images': 0
-        },
-        'current_page': "Generate"
     }
     
     for key, value in defaults.items():
@@ -147,7 +112,6 @@ def authenticate_with_service_account(service_account_json):
             scopes=SCOPES
         )
         service = build('drive', 'v3', credentials=credentials)
-        st.session_state.credentials = credentials
         st.session_state.service = service
         st.session_state.authenticated = True
         return True, "Successfully authenticated with Google Drive"
@@ -162,7 +126,7 @@ def create_app_folder():
     try:
         # Search for existing folder
         results = st.session_state.service.files().list(
-            q="name='AI_Image_Generator' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            q="name='AI_Generated_Images' and mimeType='application/vnd.google-apps.folder' and trashed=false",
             spaces='drive',
             fields='files(id, name)',
             pageSize=1
@@ -175,7 +139,7 @@ def create_app_folder():
         
         # Create new folder
         file_metadata = {
-            'name': 'AI_Image_Generator',
+            'name': 'AI_Generated_Images',
             'mimeType': 'application/vnd.google-apps.folder'
         }
         folder = st.session_state.service.files().create(
@@ -226,20 +190,18 @@ def upload_to_gdrive(image_url: str, file_name: str, task_id: str = None):
         
         file_id = file.get('id')
         
+        # Make the file publicly accessible
         permission = {
             'type': 'anyone',
             'role': 'reader'
         }
         st.session_state.service.permissions().create(
             fileId=file_id,
-            body=permission,
-            fields='id'
+            body=permission
         ).execute()
         
+        # Generate direct public URL for image display
         public_url = f"https://drive.google.com/uc?export=view&id={file_id}"
-        
-        # Update stats
-        st.session_state.stats['uploaded_images'] += 1
         
         return {
             'file_id': file_id,
@@ -254,17 +216,18 @@ def upload_to_gdrive(image_url: str, file_name: str, task_id: str = None):
         st.error(f"Error uploading to Google Drive: {str(e)}")
         return None
 
-def list_gdrive_images(folder_id: Optional[str] = None):
+def list_gdrive_images():
     """List all images in Google Drive folder."""
     if not st.session_state.service:
         return []
     
     try:
+        folder_id = st.session_state.gdrive_folder_id or create_app_folder()
         if not folder_id:
-            folder_id = st.session_state.gdrive_folder_id or create_app_folder()
+            return []
         
         results = st.session_state.service.files().list(
-            q=f"'{folder_id}' in parents and trashed=false and (mimeType='image/png' or mimeType='image/jpeg' or mimeType='image/webp')",
+            q=f"'{folder_id}' in parents and trashed=false and (mimeType='image/png' or mimeType='image/jpeg')",
             spaces='drive',
             fields='files(id, name, webViewLink, createdTime)',
             pageSize=100,
@@ -272,6 +235,8 @@ def list_gdrive_images(folder_id: Optional[str] = None):
         ).execute()
         
         files = results.get('files', [])
+        
+        # Add public URLs to each file
         for file in files:
             file['public_url'] = f"https://drive.google.com/uc?export=view&id={file['id']}"
         
@@ -296,7 +261,7 @@ def delete_gdrive_file(file_id: str):
 # API Functions
 # ============================================================================
 
-def create_task(api_key, model, input_params, callback_url=None):
+def create_task(api_key, model, input_params):
     """Create a generation task."""
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -308,9 +273,6 @@ def create_task(api_key, model, input_params, callback_url=None):
         "input": input_params
     }
     
-    if callback_url:
-        payload["callBackUrl"] = callback_url
-    
     try:
         response = requests.post(
             f"{BASE_URL}/createTask",
@@ -320,14 +282,10 @@ def create_task(api_key, model, input_params, callback_url=None):
         )
         
         data = response.json()
-        if response.status_code == 200:
-            if data.get("code") == 200:
-                st.session_state.stats['total_tasks'] += 1
-                return {"success": True, "task_id": data["data"]["taskId"]}
-            else:
-                return {"success": False, "error": data.get('msg', 'Unknown error')}
+        if response.status_code == 200 and data.get("code") == 200:
+            return {"success": True, "task_id": data["data"]["taskId"]}
         else:
-            return {"success": False, "error": f"HTTP {response.status_code}: {response.text}"}
+            return {"success": False, "error": data.get('msg', 'Unknown error')}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -349,15 +307,12 @@ def check_task_status(api_key, task_id):
             data = response.json()
             if data.get("code") == 200:
                 return {"success": True, "data": data["data"]}
-            else:
-                return {"success": False, "error": data.get('msg', 'Unknown error')}
-        else:
-            return {"success": False, "error": f"HTTP {response.status_code}"}
+        return {"success": False, "error": "Failed to check status"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 def poll_task_until_complete(api_key, task_id, max_attempts=60, delay=2):
-    """Poll task status until completion or timeout."""
+    """Poll task status until completion."""
     progress_bar = st.progress(0)
     status_text = st.empty()
     
@@ -374,53 +329,22 @@ def poll_task_until_complete(api_key, task_id, max_attempts=60, delay=2):
             
             if state == "success":
                 progress_bar.progress(1.0)
-                status_text.text("✅ Task completed successfully!")
+                status_text.success("✅ Task completed successfully!")
                 return {"success": True, "data": task_data}
             elif state == "fail":
                 progress_bar.empty()
-                status_text.text("❌ Task failed")
-                return {"success": False, "error": task_data.get('failMsg', 'Unknown error'), "data": task_data}
+                status_text.error("❌ Task failed")
+                return {"success": False, "error": task_data.get('failMsg', 'Unknown error')}
             
-            time.sleep(delay)
-        else:
-            status_text.text(f"⚠️ Error checking status: {result['error']}")
             time.sleep(delay)
     
     progress_bar.empty()
-    status_text.text("⏱️ Timeout reached")
-    return {"success": False, "error": "Timeout reached"}
-
-def save_and_upload_results(task_id, model, prompt, result_urls):
-    """Save results to history and auto-upload to Google Drive if enabled."""
-    for i, task in enumerate(st.session_state.task_history):
-        if task['id'] == task_id:
-            st.session_state.task_history[i]['status'] = 'success'
-            st.session_state.task_history[i]['results'] = result_urls
-            st.session_state.stats['successful_tasks'] += 1
-            
-            # Auto-upload to Google Drive if enabled
-            if st.session_state.authenticated and st.session_state.auto_upload:
-                for j, result_url in enumerate(result_urls):
-                    file_name = f"{model.replace('/', '_')}_{task_id}_{j+1}.png"
-                    upload_info = upload_to_gdrive(result_url, file_name, task_id)
-                    if upload_info:
-                        st.session_state.library_images.insert(0, upload_info)
-            break
+    status_text.warning("⏱️ Timeout reached")
+    return {"success": False, "error": "Timeout"}
 
 # ============================================================================
 # Sidebar
 # ============================================================================
-
-def load_persisted_service_account():
-    if st.session_state.service_account_info and not st.session_state.authenticated:
-        try:
-            service_account_json = json.loads(st.session_state.service_account_info)
-            authenticate_with_service_account(service_account_json)
-        except Exception:
-            st.session_state.service_account_info = None
-            st.session_state.authenticated = False
-
-load_persisted_service_account()
 
 with st.sidebar:
     st.markdown("# 🎨 AI Image Generator")
@@ -434,11 +358,9 @@ with st.sidebar:
         value=st.session_state.api_key,
         help="Enter your KIE.AI API key"
     )
+    st.session_state.api_key = api_key
     
-    if api_key != st.session_state.api_key:
-        st.session_state.api_key = api_key
-    
-    if st.session_state.api_key:
+    if api_key:
         st.success("✅ API Key configured")
     else:
         st.warning("⚠️ Please enter API key")
@@ -450,34 +372,31 @@ with st.sidebar:
     
     if not st.session_state.authenticated:
         uploaded_file = st.file_uploader(
-            "Service Account JSON",
+            "Upload Service Account JSON",
             type=['json'],
-            help="Upload Google service account credentials"
+            help="Upload your Google service account credentials"
         )
         
         if uploaded_file is not None:
             try:
-                service_account_json = json.loads(uploaded_file.getvalue().decode("utf-8"))
+                file_content = uploaded_file.getvalue().decode("utf-8")
+                service_account_json = json.loads(file_content)
+                
                 success, message = authenticate_with_service_account(service_account_json)
                 
                 if success:
-                    st.session_state.service_account_info = uploaded_file.getvalue().decode("utf-8")
+                    st.session_state.service_account_info = file_content
                     st.success(message)
-                    create_app_folder()
+                    folder_id = create_app_folder()
+                    if folder_id:
+                        st.success(f"✅ Folder ready")
                     st.rerun()
                 else:
                     st.error(message)
             except Exception as e:
-                st.error(f"Error: {str(e)}")
+                st.error(f"❌ Error: {str(e)}")
     else:
         st.success("✅ Google Drive Connected")
-        
-        st.checkbox(
-            "Auto Upload",
-            value=st.session_state.auto_upload,
-            key="auto_upload_checkbox",
-            on_change=lambda: setattr(st.session_state, 'auto_upload', st.session_state.auto_upload_checkbox)
-        )
         
         if st.button("🔄 Refresh Library", use_container_width=True):
             st.session_state.library_images = list_gdrive_images()
@@ -491,218 +410,281 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Statistics
-    st.header("📊 Statistics")
-    col1, col2 = st.columns(2)
-    col1.metric("Total Tasks", st.session_state.stats['total_tasks'])
-    col2.metric("Successful", st.session_state.stats['successful_tasks'])
-    col1.metric("Failed", st.session_state.stats['failed_tasks'])
-    col2.metric("Uploaded", st.session_state.stats['uploaded_images'])
+    # Navigation
+    st.header("📍 Navigation")
+    
+    if st.button("✨ Generate", use_container_width=True):
+        st.session_state.current_page = "Generate"
+        st.rerun()
+    
+    if st.button("📚 Library", use_container_width=True):
+        st.session_state.current_page = "Library"
+        st.rerun()
+    
+    if st.button("📋 History", use_container_width=True):
+        st.session_state.current_page = "History"
+        st.rerun()
 
 # ============================================================================
-# Main Pages
+# Pages
 # ============================================================================
 
 def display_generate_page():
-    st.title("✨ Generate Images")
+    st.markdown("<div class='main-header'><h1>✨ Generate AI Images</h1></div>", unsafe_allow_html=True)
     
     if not st.session_state.api_key:
-        st.error("Please configure your API Key in the sidebar.")
+        st.error("⚠️ Please configure your API Key in the sidebar")
         return
-
-    tab1, tab2, tab3 = st.tabs(["Text-to-Image", "Qwen Image Edit", "Seedream V4 Edit"])
-
+    
+    tab1, tab2, tab3 = st.tabs(["🎨 Text-to-Image", "✏️ Qwen Edit", "🔮 Seedream V4"])
+    
     with tab1:
-        with st.form("text_to_image_form"):
-            prompt = st.text_area("Prompt", "A photorealistic majestic lion wearing a crown, digital art")
-            negative_prompt = st.text_area("Negative Prompt", "blurry, low quality")
+        with st.form("txt2img_form"):
+            prompt = st.text_area("Prompt", "A majestic lion wearing a golden crown, photorealistic, 4k", height=100)
             
             col1, col2, col3 = st.columns(3)
-            model = col1.selectbox("Model", ["stable-diffusion-xl", "dall-e-3"], key="t2i_model")
-            width = col2.slider("Width", 512, 1024, 1024, 64, key="t2i_width")
-            height = col3.slider("Height", 512, 1024, 1024, 64, key="t2i_height")
+            with col1:
+                width = st.slider("Width", 512, 1024, 1024, step=64)
+            with col2:
+                height = st.slider("Height", 512, 1024, 1024, step=64)
+            with col3:
+                num_images = st.slider("Images", 1, 4, 1)
             
-            num_images = st.slider("Images", 1, 4, 1, key="t2i_num")
+            submitted = st.form_submit_button("🚀 Generate", use_container_width=True)
             
-            if st.form_submit_button("Generate"):
+            if submitted:
                 input_params = {
                     "prompt": prompt,
-                    "negative_prompt": negative_prompt,
                     "width": width,
                     "height": height,
                     "num_images": num_images
                 }
                 
-                result = create_task(st.session_state.api_key, model, input_params)
+                with st.spinner("Creating task..."):
+                    result = create_task(st.session_state.api_key, "stable-diffusion-xl", input_params)
                 
                 if result["success"]:
                     task_id = result["task_id"]
-                    st.session_state.task_history.insert(0, {
-                        "id": task_id,
-                        "model": model,
-                        "prompt": prompt,
-                        "status": "waiting",
-                        "created_at": datetime.now().isoformat(),
-                        "results": []
-                    })
-                    st.session_state.current_task = task_id
-                    st.rerun()
+                    st.info(f"✅ Task created: {task_id}")
+                    
+                    # Poll for completion
+                    poll_result = poll_task_until_complete(st.session_state.api_key, task_id)
+                    
+                    if poll_result["success"]:
+                        try:
+                            result_json = json.loads(poll_result['data'].get('resultJson', '{}'))
+                            result_urls = result_json.get('resultUrls', [])
+                            
+                            if result_urls:
+                                st.success(f"🎉 Generated {len(result_urls)} images!")
+                                
+                                # Display images
+                                cols = st.columns(len(result_urls))
+                                for idx, url in enumerate(result_urls):
+                                    with cols[idx]:
+                                        st.image(url, use_column_width=True)
+                                
+                                # Auto-upload to Google Drive
+                                if st.session_state.authenticated:
+                                    st.info("📤 Uploading to Google Drive...")
+                                    for idx, url in enumerate(result_urls):
+                                        file_name = f"txt2img_{task_id}_{idx+1}.png"
+                                        upload_info = upload_to_gdrive(url, file_name, task_id)
+                                        if upload_info:
+                                            st.session_state.library_images.insert(0, upload_info)
+                                            st.success(f"✅ Uploaded {file_name}")
+                                    
+                                    st.success("🎊 All images uploaded to Google Drive!")
+                        except Exception as e:
+                            st.error(f"Error processing results: {str(e)}")
+                    else:
+                        st.error(f"Task failed: {poll_result.get('error', 'Unknown error')}")
                 else:
-                    st.error(f"Failed: {result['error']}")
-
+                    st.error(f"Failed to create task: {result['error']}")
+    
     with tab2:
         with st.form("qwen_form"):
-            prompt = st.text_area("Edit Prompt", "Make vibrant and colorful", key="qwen_prompt")
-            image_url = st.text_input("Image URL", key="qwen_url")
+            prompt = st.text_area("Edit Prompt", "Make the image vibrant and colorful", height=100)
+            image_url = st.text_input("Image URL", "https://example.com/image.jpg")
             
             col1, col2 = st.columns(2)
-            image_size = col1.selectbox("Size", ["square_hd", "portrait_4_3", "landscape_16_9"], key="qwen_size")
-            num_steps = col2.slider("Steps", 2, 49, 25, key="qwen_steps")
+            with col1:
+                image_size = st.selectbox("Size", ["square_hd", "landscape_16_9", "portrait_4_3"])
+            with col2:
+                guidance_scale = st.slider("Guidance", 0.0, 20.0, 4.0)
             
-            if st.form_submit_button("Edit Image"):
+            submitted = st.form_submit_button("✏️ Edit Image", use_container_width=True)
+            
+            if submitted:
                 input_params = {
                     "prompt": prompt,
                     "image_url": image_url,
                     "image_size": image_size,
-                    "num_inference_steps": num_steps
+                    "guidance_scale": guidance_scale
                 }
                 
-                result = create_task(st.session_state.api_key, "qwen/image-edit", input_params)
+                with st.spinner("Creating edit task..."):
+                    result = create_task(st.session_state.api_key, "qwen/image-edit", input_params)
                 
                 if result["success"]:
                     task_id = result["task_id"]
-                    st.session_state.task_history.insert(0, {
-                        "id": task_id,
-                        "model": "qwen/image-edit",
-                        "prompt": prompt,
-                        "status": "waiting",
-                        "created_at": datetime.now().isoformat(),
-                        "results": []
-                    })
-                    st.session_state.current_task = task_id
-                    st.rerun()
+                    st.info(f"✅ Task created: {task_id}")
+                    
+                    poll_result = poll_task_until_complete(st.session_state.api_key, task_id)
+                    
+                    if poll_result["success"]:
+                        try:
+                            result_json = json.loads(poll_result['data'].get('resultJson', '{}'))
+                            result_urls = result_json.get('resultUrls', [])
+                            
+                            if result_urls:
+                                st.success("🎉 Image edited successfully!")
+                                st.image(result_urls[0], use_column_width=True)
+                                
+                                if st.session_state.authenticated:
+                                    file_name = f"qwen_edit_{task_id}.png"
+                                    upload_info = upload_to_gdrive(result_urls[0], file_name, task_id)
+                                    if upload_info:
+                                        st.session_state.library_images.insert(0, upload_info)
+                                        st.success(f"✅ Uploaded to Google Drive!")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
                 else:
                     st.error(f"Failed: {result['error']}")
-
+    
     with tab3:
         with st.form("seedream_form"):
-            prompt = st.text_area("Edit Prompt", "Create a tshirt mockup", key="seedream_prompt")
-            image_url = st.text_input("Image URL", key="seedream_url")
+            prompt = st.text_area("Prompt", "Create a t-shirt mockup with this design", height=100)
+            image_url = st.text_input("Image URL", "https://example.com/design.png")
             
             col1, col2 = st.columns(2)
-            image_size = col1.selectbox("Size", ["square_hd", "landscape_16_9"], key="seedream_size")
-            resolution = col2.selectbox("Resolution", ["1K", "2K", "4K"], key="seedream_res")
+            with col1:
+                image_size = st.selectbox("Size", ["square_hd", "landscape_16_9", "portrait_4_3"], key="seedream_size")
+            with col2:
+                max_images = st.slider("Max Images", 1, 6, 1)
             
-            if st.form_submit_button("Edit Image"):
+            submitted = st.form_submit_button("🔮 Generate", use_container_width=True)
+            
+            if submitted:
                 input_params = {
                     "prompt": prompt,
                     "image_urls": [image_url],
                     "image_size": image_size,
-                    "image_resolution": resolution
+                    "max_images": max_images
                 }
                 
-                result = create_task(st.session_state.api_key, "bytedance/seedream-v4-edit", input_params)
+                with st.spinner("Creating Seedream task..."):
+                    result = create_task(st.session_state.api_key, "bytedance/seedream-v4-edit", input_params)
                 
                 if result["success"]:
                     task_id = result["task_id"]
-                    st.session_state.task_history.insert(0, {
-                        "id": task_id,
-                        "model": "bytedance/seedream-v4-edit",
-                        "prompt": prompt,
-                        "status": "waiting",
-                        "created_at": datetime.now().isoformat(),
-                        "results": []
-                    })
-                    st.session_state.current_task = task_id
-                    st.rerun()
+                    st.info(f"✅ Task created: {task_id}")
+                    
+                    poll_result = poll_task_until_complete(st.session_state.api_key, task_id)
+                    
+                    if poll_result["success"]:
+                        try:
+                            result_json = json.loads(poll_result['data'].get('resultJson', '{}'))
+                            result_urls = result_json.get('resultUrls', [])
+                            
+                            if result_urls:
+                                st.success(f"🎉 Generated {len(result_urls)} variations!")
+                                
+                                cols = st.columns(min(len(result_urls), 3))
+                                for idx, url in enumerate(result_urls):
+                                    with cols[idx % 3]:
+                                        st.image(url, use_column_width=True)
+                                
+                                if st.session_state.authenticated:
+                                    for idx, url in enumerate(result_urls):
+                                        file_name = f"seedream_{task_id}_{idx+1}.png"
+                                        upload_info = upload_to_gdrive(url, file_name, task_id)
+                                        if upload_info:
+                                            st.session_state.library_images.insert(0, upload_info)
+                                    st.success("✅ All uploaded to Google Drive!")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
                 else:
                     st.error(f"Failed: {result['error']}")
 
-    # Auto-poll current task
-    if st.session_state.current_task:
-        for task in st.session_state.task_history:
-            if task['id'] == st.session_state.current_task and task['status'] == 'waiting':
-                st.info(f"Processing task {task['id']}...")
-                result = poll_task_until_complete(st.session_state.api_key, task['id'])
-                
-                if result["success"]:
-                    try:
-                        result_json = json.loads(result['data'].get('resultJson', '{}'))
-                        result_urls = result_json.get('resultUrls', [])
-                        save_and_upload_results(task['id'], task['model'], task['prompt'], result_urls)
-                        st.success("Task completed!")
-                    except:
-                        task['status'] = 'fail'
-                        st.session_state.stats['failed_tasks'] += 1
-                else:
-                    task['status'] = 'fail'
-                    st.session_state.stats['failed_tasks'] += 1
-                
-                st.session_state.current_task = None
-                st.rerun()
-
 def display_library_page():
-    st.title("📚 Image Library")
-    
-    if st.button("⬅️ Back to Generate", use_container_width=False):
+    # Back to Generate button
+    if st.button("← Back to Generate", key="back_to_gen", use_container_width=False):
         st.session_state.current_page = "Generate"
         st.rerun()
     
-    st.markdown("---")
+    st.markdown("<div class='main-header'><h1>📚 Image Library</h1></div>", unsafe_allow_html=True)
     
     if not st.session_state.authenticated:
-        st.error("Please connect Google Drive in the sidebar.")
+        st.error("⚠️ Please connect Google Drive in the sidebar")
         return
     
+    # Refresh images
     if not st.session_state.library_images:
         st.session_state.library_images = list_gdrive_images()
     
     if not st.session_state.library_images:
-        st.info("No images in library yet.")
+        st.info("📭 Your library is empty. Generate some images!")
         return
     
-    st.markdown(f"**{len(st.session_state.library_images)}** images in library")
+    st.markdown(f"### Found **{len(st.session_state.library_images)}** images")
     
+    # Display images in grid
     cols_per_row = 3
+    
     for i, img in enumerate(st.session_state.library_images):
         if i % cols_per_row == 0:
             cols = st.columns(cols_per_row)
         
         with cols[i % cols_per_row]:
-            # Display actual image using public URL
+            st.markdown("<div class='image-card'>", unsafe_allow_html=True)
+            
+            # Display image using public URL
             if 'public_url' in img:
-                st.image(img['public_url'], use_container_width=True)
+                st.image(img['public_url'], use_column_width=True)
             
-            file_name = img.get('name', img.get('file_name', 'Unknown'))
-            st.caption(file_name)
+            # File name
+            file_name = img.get('file_name') or img.get('name', 'Unknown')
+            st.markdown(f"**{file_name}**")
             
+            # Buttons
             col1, col2 = st.columns(2)
-            
             with col1:
-                # Link to open in Google Drive
-                web_link = img.get('web_link', img.get('webViewLink', '#'))
-                st.markdown(f"[Open in Drive]({web_link})")
+                if st.button("🔗 Open", key=f"open_{img.get('file_id') or img.get('id')}", use_container_width=True):
+                    web_link = img.get('web_link') or img.get('webViewLink', '#')
+                    st.markdown(f'<meta http-equiv="refresh" content="0; url={web_link}">', unsafe_allow_html=True)
             
             with col2:
-                # Delete button
-                file_id = img.get('id', img.get('file_id'))
-                if st.button("🗑️", key=f"del_{file_id}", help="Delete"):
+                file_id = img.get('file_id') or img.get('id')
+                if st.button("🗑️ Delete", key=f"del_{file_id}", use_container_width=True):
                     if delete_gdrive_file(file_id):
-                        st.session_state.library_images = [
-                            x for x in st.session_state.library_images 
-                            if x.get('id', x.get('file_id')) != file_id
-                        ]
+                        st.success("Deleted!")
+                        st.session_state.library_images = [x for x in st.session_state.library_images if (x.get('file_id') or x.get('id')) != file_id]
                         st.rerun()
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+
+def display_history_page():
+    st.markdown("<div class='main-header'><h1>📋 Task History</h1></div>", unsafe_allow_html=True)
+    
+    if not st.session_state.task_history:
+        st.info("📭 No tasks yet")
+    else:
+        for task in st.session_state.task_history:
+            st.markdown(f"**Task ID:** {task['id']}")
+            st.markdown(f"**Status:** {task['status']}")
+            st.markdown("---")
 
 # ============================================================================
-# Navigation
+# Main Router
 # ============================================================================
 
-# Main navigation tabs
-main_tab1, main_tab2 = st.tabs(["🎨 Generate", "📚 Library"])
-
-with main_tab1:
+if st.session_state.current_page == "Generate":
     display_generate_page()
-
-with main_tab2:
+elif st.session_state.current_page == "Library":
     display_library_page()
+elif st.session_state.current_page == "History":
+    display_history_page()
+else:
+    st.session_state.current_page = "Generate"
+    st.rerun()
