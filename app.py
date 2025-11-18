@@ -7,13 +7,18 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 
-# PIL (safe import)
+# -----------------------------
+# PIL (Safe Import)
+# -----------------------------
 try:
     from PIL import Image as PILImage
 except Exception:
     PILImage = None
+    st.error("Pillow is missing. Add 'Pillow' to requirements.txt")
 
-# Google Drive (safe import)
+# -----------------------------
+# Google Drive (Safe Import)
+# -----------------------------
 try:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
@@ -22,6 +27,8 @@ except Exception:
     service_account = None
     build = None
     MediaIoBaseUpload = None
+    st.error("Google API packages missing. Add these to requirements.txt: "
+             "google-auth, google-auth-oauthlib, google-auth-httplib2, google-api-python-client")
 
 
 # ============================================================================
