@@ -12,8 +12,10 @@ Pillow
 # OpenCV
 opencv-python==4.8.1.78
 
-# Google API (required for Google Drive)
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
+# Google API (pinned for Streamlit Cloud compatibility)
+google-auth==2.23.4
+google-auth-oauthlib==1.1.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.101.0
+googleapis-common-protos==1.60.0
+httplib2==0.22.0
