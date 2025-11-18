@@ -184,7 +184,7 @@ def init_session_state():
     }
     
     for key, value in defaults.items():
-        if key not not in st.session_state:
+        if key not in st.session_state:
             st.session_state[key] = value
 
 init_session_state()
@@ -1014,7 +1014,7 @@ def display_library_page():
                 
                 if not image_displayed:
                     st.markdown(f"<div class='image-placeholder'>🖼️<br>Preview unavailable</div>", unsafe_allow_html=True)
-                    st.markdown(f"[📎 Open in Drive]({web_link})")
+                    st.markdown(f"[📎 Open in Drive]({web_link})", unsafe_allow_html=True)
                 
                 st.markdown("---")
                 edit_col1, edit_col2 = st.columns(2)
