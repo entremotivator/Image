@@ -1,12 +1,13 @@
 import streamlit as st
-import os
-import json
-import pickle
 import requests
-from pathlib import Path
+import json
+import time
+import io
+import pickle
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
-import io
+from pathlib import Path
 from PIL import Image as PILImage
 import cv2
 import numpy as np
@@ -19,141 +20,147 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
 
 # ============================================================================
-# Configuration & Constants
-# ============================================================================
-
-SCOPES = ['https://www.googleapis.com/auth/drive']
-CLIENT_SECRETS_FILE = 'client_secrets.json'
-TOKEN_PICKLE_FILE = 'token.pickle'
-CREDENTIALS_DIR = Path('.credentials')
-CREDENTIALS_DIR.mkdir(exist_ok=True)
-
-# Image generation API configuration
-IMAGE_GEN_API_URL = "https://api.aiquickdraw.com/api/v1/generation/text-to-image"
-IMAGE_EDIT_API_URL = "https://api.aiquickdraw.com/api/v1/generation/image-edit"
-
-# ============================================================================
-# Streamlit Page Configuration
+# Streamlit Cloud Configuration
 # ============================================================================
 
 st.set_page_config(
-    page_title="Image Generation Enhancer",
+    page_title="AI Image Editor Pro",
     page_icon="🎨",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better UI
+# Custom CSS
 st.markdown("""
-    <style>
-    .main {
-        padding: 2rem;
+<style>
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
     }
-    .stTabs [data-baseweb="tab-list"] button {
-        font-size: 16px;
-        font-weight: 600;
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        padding-left: 20px;
+        padding-right: 20px;
     }
-    .gallery-item {
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+    }
+    .success-box {
+        background-color: #d4edda;
+        padding: 15px;
         border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        transition: transform 0.2s;
+        border-left: 4px solid #28a745;
     }
-    .gallery-item:hover {
-        transform: scale(1.02);
+    .error-box {
+        background-color: #f8d7da;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #dc3545;
     }
-    </style>
+    .info-box {
+        background-color: #d1ecf1;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 4px solid #17a2b8;
+    }
+</style>
 """, unsafe_allow_html=True)
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+# API Configuration
+BASE_URL = "https://api.kie.ai/api/v1/jobs"
+
+# Google Drive Scopes
+SCOPES = ['https://www.googleapis.com/auth/drive']
 
 # ============================================================================
 # Session State Initialization
 # ============================================================================
 
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-    st.session_state.user_email = None
-    st.session_state.service = None
-    st.session_state.credentials = None
-    st.session_state.generated_images = []
-    st.session_state.library_images = []
-    st.session_state.current_page = 'home'
-    st.session_state.selected_image = None
-    st.session_state.editor_mode = False
-    st.session_state.gdrive_folder_id = None
-
-# ============================================================================
-# Google Drive Authentication Functions
-# ============================================================================
-
-def get_google_auth_flow():
-    """Initialize Google OAuth flow."""
-    if not os.path.exists(CLIENT_SECRETS_FILE):
-        st.error("⚠️ client_secrets.json not found. Please upload your Google OAuth credentials.")
-        st.stop()
+def init_session_state():
+    """Initialize all session state variables."""
+    defaults = {
+        'api_key': "",
+        'task_history': [],
+        'current_task': None,
+        'authenticated': False,
+        'user_email': None,
+        'service': None,
+        'credentials': None,
+        'generated_images': [],
+        'library_images': [],
+        'current_page': 'home',
+        'selected_image': None,
+        'editor_mode': False,
+        'gdrive_folder_id': None,
+        'last_refresh': None,
+        'edit_history': [],
+    }
     
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
-        scopes=SCOPES,
-        redirect_uri='http://localhost:8501'
-    )
-    return flow
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
-def save_credentials(credentials):
-    """Save credentials to pickle file."""
-    token_path = CREDENTIALS_DIR / TOKEN_PICKLE_FILE
-    with open(token_path, 'wb') as token:
-        pickle.dump(credentials, token)
+init_session_state()
 
-def load_credentials():
-    """Load credentials from pickle file."""
-    token_path = CREDENTIALS_DIR / TOKEN_PICKLE_FILE
-    if token_path.exists():
-        with open(token_path, 'rb') as token:
-            return pickle.load(token)
+# ============================================================================
+# Google Drive Functions (Cloud-Optimized)
+# ============================================================================
+
+def get_google_credentials_from_secrets():
+    """Get Google credentials from Streamlit secrets."""
+    try:
+        secrets = st.secrets
+        if "google_client_id" in secrets and "google_client_secret" in secrets:
+            return {
+                "client_id": secrets["google_client_id"],
+                "client_secret": secrets["google_client_secret"],
+                "redirect_uri": "https://streamlit.io"
+            }
+    except:
+        pass
     return None
-
-def refresh_credentials(credentials):
-    """Refresh expired credentials."""
-    if credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
-        save_credentials(credentials)
-    return credentials
 
 def authenticate_google_drive():
-    """Authenticate with Google Drive."""
-    credentials = load_credentials()
-    
-    if credentials:
-        credentials = refresh_credentials(credentials)
-    else:
-        flow = get_google_auth_flow()
+    """Authenticate with Google Drive using OAuth."""
+    try:
+        secrets = st.secrets
+        
+        # Create OAuth flow
+        flow = Flow.from_client_config(
+            {
+                "installed": {
+                    "client_id": secrets["google_client_id"],
+                    "client_secret": secrets["google_client_secret"],
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": ["https://streamlit.io"]
+                }
+            },
+            scopes=SCOPES
+        )
+        
         auth_url, state = flow.authorization_url(access_type='offline', prompt='consent')
         
-        st.info("🔐 Please authenticate with Google Drive to continue.")
-        st.markdown(f"[Click here to authenticate]({auth_url})")
+        st.info("🔐 Click the link below to authenticate with Google Drive:")
+        st.markdown(f"[Authenticate with Google]({auth_url})")
         
-        auth_code = st.text_input("Enter the authorization code from the redirect URL:")
+        auth_code = st.text_input("Paste the authorization code here:")
+        
         if auth_code:
-            try:
-                credentials = flow.fetch_token(code=auth_code)
-                save_credentials(credentials)
-                st.success("✅ Authentication successful!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Authentication failed: {str(e)}")
-                return None
-    
-    if credentials:
-        st.session_state.credentials = credentials
-        st.session_state.authenticated = True
-        st.session_state.service = build('drive', 'v3', credentials=credentials)
-        return credentials
-    
-    return None
-
-# ============================================================================
-# Google Drive Functions
-# ============================================================================
+            credentials = flow.fetch_token(code=auth_code)
+            st.session_state.credentials = credentials
+            st.session_state.authenticated = True
+            st.session_state.service = build('drive', 'v3', credentials=Credentials.from_authorized_user_info(credentials))
+            st.success("✅ Authentication successful!")
+            st.rerun()
+    except Exception as e:
+        st.error(f"Authentication error: {str(e)}")
 
 def create_app_folder():
     """Create or get the app's folder in Google Drive."""
@@ -161,9 +168,8 @@ def create_app_folder():
         return None
     
     try:
-        # Search for existing folder
         results = st.session_state.service.files().list(
-            q="name='Image Generation Enhancer' and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            q="name='AI Image Editor Pro' and mimeType='application/vnd.google-apps.folder' and trashed=false",
             spaces='drive',
             fields='files(id, name)',
             pageSize=1
@@ -171,11 +177,11 @@ def create_app_folder():
         
         files = results.get('files', [])
         if files:
+            st.session_state.gdrive_folder_id = files[0]['id']
             return files[0]['id']
         
-        # Create new folder if not exists
         file_metadata = {
-            'name': 'Image Generation Enhancer',
+            'name': 'AI Image Editor Pro',
             'mimeType': 'application/vnd.google-apps.folder'
         }
         folder = st.session_state.service.files().create(
@@ -189,7 +195,7 @@ def create_app_folder():
         st.error(f"Error creating folder: {str(e)}")
         return None
 
-def upload_to_gdrive(file_path: str, file_name: str, folder_id: Optional[str] = None):
+def upload_to_gdrive(file_data: bytes, file_name: str, folder_id: Optional[str] = None):
     """Upload a file to Google Drive."""
     if not st.session_state.service:
         return None
@@ -203,7 +209,7 @@ def upload_to_gdrive(file_path: str, file_name: str, folder_id: Optional[str] = 
             'parents': [folder_id] if folder_id else []
         }
         
-        media = MediaFileUpload(file_path, mimetype='image/png')
+        media = MediaIoBaseUpload(io.BytesIO(file_data), mimetype='image/png')
         file = st.session_state.service.files().create(
             body=file_metadata,
             media_body=media,
@@ -255,103 +261,76 @@ def delete_gdrive_file(file_id: str):
         return False
 
 # ============================================================================
-# Image Generation Functions
+# API Functions
 # ============================================================================
 
-def generate_image(prompt: str, image_size: str = "square_hd", resolution: str = "1K", api_key: str = None):
-    """Generate an image using the external API."""
-    if not api_key:
-        st.error("API key is required for image generation.")
-        return None
+def create_task(api_key, model, input_params, callback_url=None):
+    """Create a generation task."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": model,
+        "input": input_params
+    }
+    
+    if callback_url:
+        payload["callBackUrl"] = callback_url
     
     try:
-        headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json'
-        }
+        response = requests.post(
+            f"{BASE_URL}/createTask",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
         
-        payload = {
-            "input": {
-                "image_size": image_size,
-                "image_resolution": resolution,
-                "prompt": prompt,
-                "max_images": 1
-            },
-            "model": "bytedance/seedream-v4"
-        }
-        
-        with st.spinner("🎨 Generating image..."):
-            response = requests.post(IMAGE_GEN_API_URL, json=payload, headers=headers, timeout=120)
-            response.raise_for_status()
-            
-            result = response.json()
-            if result.get('state') == 'success':
-                result_json = json.loads(result.get('resultJson', '{}'))
-                image_urls = result_json.get('resultUrls', [])
-                
-                if image_urls:
-                    return {
-                        'url': image_urls[0],
-                        'prompt': prompt,
-                        'model': result.get('model'),
-                        'size': image_size,
-                        'resolution': resolution,
-                        'generated_at': datetime.now().isoformat()
-                    }
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 200:
+                return {"success": True, "task_id": data["data"]["taskId"]}
             else:
-                st.error(f"Image generation failed: {result.get('failMsg', 'Unknown error')}")
-                return None
+                return {"success": False, "error": data.get('msg', 'Unknown error')}
+        else:
+            return {"success": False, "error": f"HTTP {response.status_code}"}
     except Exception as e:
-        st.error(f"Error generating image: {str(e)}")
-        return None
+        return {"success": False, "error": str(e)}
 
-def edit_image(image_url: str, prompt: str, api_key: str = None):
-    """Edit an existing image using the external API."""
-    if not api_key:
-        st.error("API key is required for image editing.")
-        return None
+def check_task_status(api_key, task_id):
+    """Check task status."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+    }
     
     try:
-        headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json'
-        }
+        response = requests.get(
+            f"{BASE_URL}/recordInfo",
+            headers=headers,
+            params={"taskId": task_id},
+            timeout=30
+        )
         
-        payload = {
-            "input": {
-                "image_urls": [image_url],
-                "prompt": prompt,
-                "max_images": 1
-            },
-            "model": "bytedance/seedream-v4-edit"
-        }
-        
-        with st.spinner("✏️ Editing image..."):
-            response = requests.post(IMAGE_EDIT_API_URL, json=payload, headers=headers, timeout=120)
-            response.raise_for_status()
-            
-            result = response.json()
-            if result.get('state') == 'success':
-                result_json = json.loads(result.get('resultJson', '{}'))
-                image_urls = result_json.get('resultUrls', [])
-                
-                if image_urls:
-                    return {
-                        'url': image_urls[0],
-                        'prompt': prompt,
-                        'model': result.get('model'),
-                        'edited_at': datetime.now().isoformat()
-                    }
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 200:
+                return {"success": True, "data": data["data"]}
             else:
-                st.error(f"Image editing failed: {result.get('failMsg', 'Unknown error')}")
-                return None
+                return {"success": False, "error": data.get('msg', 'Unknown error')}
+        else:
+            return {"success": False, "error": f"HTTP {response.status_code}"}
     except Exception as e:
-        st.error(f"Error editing image: {str(e)}")
-        return None
+        return {"success": False, "error": str(e)}
 
 # ============================================================================
-# Image Editor Functions
+# Image Processing Functions
 # ============================================================================
+
+@st.cache_resource
+def get_cv2_resources():
+    """Cache CV2 resources."""
+    return cv2
 
 def apply_brightness_contrast(image, brightness=0, contrast=0):
     """Apply brightness and contrast adjustments."""
@@ -363,131 +342,433 @@ def apply_brightness_contrast(image, brightness=0, contrast=0):
 
 def apply_blur(image, blur_amount=5):
     """Apply Gaussian blur."""
-    img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-    blurred = cv2.GaussianBlur(img_cv, (blur_amount * 2 + 1, blur_amount * 2 + 1), 0)
-    return PILImage.fromarray(cv2.cvtColor(blurred, cv2.COLOR_BGR2RGB))
+    cv2_module = get_cv2_resources()
+    img_cv = cv2_module.cvtColor(np.array(image), cv2_module.COLOR_RGB2BGR)
+    blurred = cv2_module.GaussianBlur(img_cv, (blur_amount * 2 + 1, blur_amount * 2 + 1), 0)
+    return PILImage.fromarray(cv2_module.cvtColor(blurred, cv2_module.COLOR_BGR2RGB))
 
 def apply_saturation(image, saturation=0):
     """Apply saturation adjustment."""
-    img_hsv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2HSV).astype(float)
+    cv2_module = get_cv2_resources()
+    img_hsv = cv2_module.cvtColor(np.array(image), cv2_module.COLOR_RGB2HSV).astype(float)
     img_hsv[:, :, 1] = img_hsv[:, :, 1] * (1 + saturation / 100)
     img_hsv[:, :, 1] = np.clip(img_hsv[:, :, 1], 0, 255)
-    return PILImage.fromarray(cv2.cvtColor(img_hsv.astype(np.uint8), cv2.COLOR_HSV2RGB))
+    return PILImage.fromarray(cv2_module.cvtColor(img_hsv.astype(np.uint8), cv2_module.COLOR_HSV2RGB))
 
 def apply_rotation(image, angle=0):
     """Apply rotation."""
     return image.rotate(angle, expand=True, fillcolor='white')
 
 # ============================================================================
-# UI Components
+# Sidebar Navigation
 # ============================================================================
 
-def render_header():
-    """Render the application header."""
-    col1, col2, col3 = st.columns([1, 2, 1])
+with st.sidebar:
+    st.markdown("# 🎨 AI Image Editor Pro")
+    st.markdown("---")
+    
+    # API Configuration
+    st.header("⚙️ Configuration")
+    
+    # Get API key from secrets or input
+    api_key = st.secrets.get("api_key", "") if "api_key" in st.secrets else ""
+    
+    if not api_key:
+        api_key = st.text_input(
+            "API Key",
+            type="password",
+            value=st.session_state.api_key,
+            help="Get from https://kie.ai/api-key"
+        )
+    
+    if api_key:
+        st.session_state.api_key = api_key
+        st.success("✅ API Key configured")
+    else:
+        st.warning("⚠️ Please enter API key")
+    
+    st.markdown("---")
+    
+    # Google Drive Authentication
+    st.header("☁️ Google Drive")
+    
+    if not st.session_state.authenticated:
+        if st.button("🔑 Authenticate Google Drive", use_container_width=True):
+            authenticate_google_drive()
+    else:
+        st.success("✅ Google Drive Connected")
+        if st.button("📂 Create App Folder", use_container_width=True):
+            folder_id = create_app_folder()
+            if folder_id:
+                st.success(f"✅ Folder ready")
+    
+    st.markdown("---")
+    
+    # Navigation
+    st.header("📍 Navigation")
+    page = st.radio(
+        "Select Page",
+        ["🏠 Home", "🎨 SeedDream V4", "✨ Qwen Edit", "📚 Library", "✏️ Editor", "📊 History", "📖 Docs"],
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("---")
+    
+    # Statistics
+    st.markdown("### 📊 Statistics")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Tasks", len(st.session_state.task_history))
+    with col2:
+        success = sum(1 for t in st.session_state.task_history if t.get('status') == 'success')
+        st.metric("Success", success)
+    
+    st.markdown("---")
+    
+    st.markdown("### 🔗 Quick Links")
+    st.markdown("- [Get API Key](https://kie.ai/api-key)")
+    st.markdown("- [Documentation](https://kie.ai/docs)")
+    st.markdown("- [Support](https://kie.ai/support)")
+
+# ============================================================================
+# Pages
+# ============================================================================
+
+# Page: Home
+if page == "🏠 Home":
+    st.title("🎨 AI Image Editor Pro")
+    st.markdown("### Transform your images with powerful AI models")
+    
+    col1, col2 = st.columns(2)
     
     with col1:
-        st.image("🎨", width=50)
+        st.markdown("""
+        <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 15px; color: white;'>
+            <h2>🎨 SeedDream V4 Edit</h2>
+            <p>Advanced image editing with multiple inputs</p>
+            <ul>
+                <li>Multi-image input (up to 10)</li>
+                <li>Multiple aspect ratios</li>
+                <li>Up to 4K resolution</li>
+                <li>Batch generation (1-6 images)</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
     
     with col2:
-        st.title("🎨 Image Generation Enhancer")
-        st.markdown("*Generate, edit, and manage images with Google Drive integration*")
+        st.markdown("""
+        <div style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 30px; border-radius: 15px; color: white;'>
+            <h2>✨ Qwen Image Edit</h2>
+            <p>Fast and precise image editing</p>
+            <ul>
+                <li>Single image editing</li>
+                <li>Acceleration options</li>
+                <li>Fine-tuned parameters</li>
+                <li>Safety checker</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
     
+    st.markdown("---")
+    
+    st.subheader("🚀 Getting Started")
+    st.markdown("""
+    1. **Configure API Key**: Enter your API key in the sidebar
+    2. **Authenticate Google Drive**: Connect your Google account for auto-upload
+    3. **Choose a Model**: Select SeedDream V4 or Qwen Image Edit
+    4. **Generate Images**: Create amazing images with AI
+    5. **Manage Library**: Organize and edit your generated images
+    """)
+    
+    st.markdown("---")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Tasks", len(st.session_state.task_history))
+    with col2:
+        successful = sum(1 for t in st.session_state.task_history if t.get('status') == 'success')
+        st.metric("Successful", successful)
     with col3:
-        if st.session_state.authenticated:
-            st.success(f"✅ Authenticated")
-            if st.button("🚪 Logout", key="logout_btn"):
-                st.session_state.authenticated = False
-                st.session_state.service = None
-                st.session_state.credentials = None
-                st.rerun()
+        failed = sum(1 for t in st.session_state.task_history if t.get('status') == 'fail')
+        st.metric("Failed", failed)
+    with col4:
+        st.metric("Library", len(st.session_state.library_images))
 
-def render_generation_page():
-    """Render the image generation page."""
-    st.header("🎨 Generate New Images")
+# Page: SeedDream V4 Edit
+elif page == "🎨 SeedDream V4":
+    st.title("🎨 SeedDream V4 Edit")
+    st.markdown("Generate and edit images with multiple inputs and high resolution output")
     
-    col1, col2 = st.columns([2, 1])
+    presets = {
+        "Custom": {},
+        "Brand Showcase": {
+            "prompt": "Create a professional brand showcase with product display, modern design, clean background",
+            "image_size": "square_hd",
+            "image_resolution": "1K",
+            "max_images": 1
+        },
+        "Product Photography": {
+            "prompt": "Professional product photography with studio lighting and clean white background",
+            "image_size": "landscape_4_3",
+            "image_resolution": "2K",
+            "max_images": 2
+        },
+        "Fashion Design": {
+            "prompt": "Modern fashion design concept with elegant styling and contemporary aesthetics",
+            "image_size": "portrait_4_3",
+            "image_resolution": "2K",
+            "max_images": 3
+        },
+    }
+    
+    preset = st.selectbox("📋 Choose a preset", list(presets.keys()))
+    
+    col1, col2 = st.columns([1, 1])
     
     with col1:
+        st.subheader("📝 Input Parameters")
+        
+        preset_data = presets.get(preset, {})
+        
         prompt = st.text_area(
-            "📝 Describe the image you want to generate:",
-            height=100,
-            placeholder="E.g., A serene landscape with mountains and a lake at sunset..."
+            "Prompt*",
+            value=preset_data.get("prompt", ""),
+            height=120,
+            max_chars=5000,
+            help="Describe how you want to edit the image"
         )
-    
-    with col2:
-        st.subheader("Settings")
-        image_size = st.selectbox(
-            "Image Size",
-            ["square_hd", "landscape_hd", "portrait_hd"],
-            help="Choose the aspect ratio for your image"
-        )
-        resolution = st.selectbox(
-            "Resolution",
-            ["1K", "2K", "4K"],
-            help="Higher resolution takes longer to generate"
-        )
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        api_key = st.text_input("🔑 API Key", type="password", help="Your image generation API key")
-    
-    with col2:
-        st.write("")
-        st.write("")
-        generate_btn = st.button("✨ Generate Image", use_container_width=True)
-    
-    with col3:
-        st.write("")
-        st.write("")
-        auto_upload = st.checkbox("📤 Auto-upload to Google Drive", value=True)
-    
-    if generate_btn:
-        if not prompt:
-            st.error("Please enter a prompt for image generation.")
-        elif not api_key:
-            st.error("Please provide an API key.")
-        else:
-            generated = generate_image(prompt, image_size, resolution, api_key)
+        
+        st.markdown("##### Input Images")
+        num_images = st.number_input("Number of input images", min_value=1, max_value=10, value=1)
+        
+        image_urls = []
+        for i in range(num_images):
+            url = st.text_input(
+                f"Image URL {i+1}*",
+                key=f"seedream_img_{i}",
+                value="https://file.aiquickdraw.com/custom-page/akr/section-images/1757930552966e7f2on7s.png" if i == 0 else "",
+            )
+            if url:
+                image_urls.append(url)
+        
+        with st.expander("🎛️ Advanced Settings", expanded=True):
+            col_a, col_b = st.columns(2)
             
-            if generated:
-                st.session_state.generated_images.append(generated)
-                
-                # Display generated image
-                st.success("✅ Image generated successfully!")
-                st.image(generated['url'], caption=f"Prompt: {prompt}", use_column_width=True)
-                
-                # Auto-upload to Google Drive
-                if auto_upload and st.session_state.authenticated:
-                    with st.spinner("📤 Uploading to Google Drive..."):
-                        # Download image first
-                        img_response = requests.get(generated['url'])
-                        img_path = f"/tmp/generated_{datetime.now().timestamp()}.png"
-                        with open(img_path, 'wb') as f:
-                            f.write(img_response.content)
+            with col_a:
+                image_size = st.selectbox(
+                    "Image Size",
+                    ["square", "square_hd", "portrait_4_3", "portrait_16_9", "landscape_4_3", "landscape_16_9"],
+                    index=1
+                )
+            
+            with col_b:
+                image_resolution = st.selectbox(
+                    "Resolution",
+                    ["1K", "2K", "4K"],
+                    index=0
+                )
+            
+            max_images = st.slider("Max Images", 1, 6, preset_data.get("max_images", 1))
+        
+        generate_btn = st.button("🚀 Generate Images", type="primary", use_container_width=True)
+    
+    with col2:
+        st.subheader("📊 Results")
+        
+        if generate_btn:
+            if not st.session_state.api_key:
+                st.error("⚠️ Please enter your API key")
+            elif not prompt:
+                st.error("⚠️ Please enter a prompt")
+            elif not image_urls:
+                st.error("⚠️ Please provide image URLs")
+            else:
+                with st.spinner("Creating generation task..."):
+                    input_params = {
+                        "prompt": prompt,
+                        "image_urls": image_urls,
+                        "image_size": image_size,
+                        "image_resolution": image_resolution,
+                        "max_images": max_images
+                    }
+                    
+                    result = create_task(st.session_state.api_key, "bytedance/seedream-v4-edit", input_params)
+                    
+                    if result["success"]:
+                        task_id = result["task_id"]
+                        st.session_state.current_task = {
+                            "task_id": task_id,
+                            "model": "bytedance/seedream-v4-edit",
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "status": "waiting"
+                        }
+                        st.session_state.task_history.append(st.session_state.current_task)
+                        st.success(f"✅ Task created!")
+                        st.code(task_id, language=None)
+                    else:
+                        st.error(f"❌ Error: {result['error']}")
+        
+        if st.session_state.current_task:
+            st.markdown("---")
+            task_id = st.session_state.current_task["task_id"]
+            
+            col_check, col_clear = st.columns(2)
+            with col_check:
+                check_btn = st.button("🔄 Check Status", use_container_width=True)
+            with col_clear:
+                if st.button("🗑️ Clear", use_container_width=True):
+                    st.session_state.current_task = None
+                    st.rerun()
+            
+            if check_btn:
+                with st.spinner("Checking status..."):
+                    result = check_task_status(st.session_state.api_key, task_id)
+                    
+                    if result["success"]:
+                        task_data = result["data"]
+                        state = task_data["state"]
                         
-                        # Upload to Google Drive
-                        upload_result = upload_to_gdrive(
-                            img_path,
-                            f"Generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                        )
+                        st.session_state.current_task["status"] = state
                         
-                        if upload_result:
-                            st.success(f"✅ Uploaded to Google Drive: {upload_result['file_name']}")
-                            st.markdown(f"[View on Google Drive]({upload_result['web_link']})")
+                        if state == "success":
+                            st.success("✅ Task completed!")
+                            result_json = json.loads(task_data.get("resultJson", "{}"))
+                            
+                            for idx, url in enumerate(result_json.get("resultUrls", [])):
+                                st.image(url, caption=f"Image {idx + 1}", use_container_width=True)
+                                
+                                # Auto-upload to Google Drive
+                                if st.session_state.authenticated:
+                                    if st.button(f"📤 Upload to Drive", key=f"upload_{idx}"):
+                                        with st.spinner("Uploading..."):
+                                            img_response = requests.get(url)
+                                            upload_result = upload_to_gdrive(
+                                                img_response.content,
+                                                f"Generated_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{idx}.png"
+                                            )
+                                            if upload_result:
+                                                st.success("✅ Uploaded to Google Drive")
                         
-                        # Clean up
-                        os.remove(img_path)
+                        elif state == "fail":
+                            st.error(f"❌ Task failed: {task_data.get('failMsg', 'Unknown error')}")
 
-def render_library_page():
-    """Render the image library page."""
-    st.header("📚 Image Library")
+# Page: Qwen Image Edit
+elif page == "✨ Qwen Edit":
+    st.title("✨ Qwen Image Edit")
+    st.markdown("Fast and precise image editing with fine control")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("📝 Input Parameters")
+        
+        prompt = st.text_area(
+            "Edit Prompt*",
+            height=120,
+            max_chars=2000,
+            help="Describe the edits you want to make"
+        )
+        
+        image_url = st.text_input(
+            "Image URL*",
+            value="https://file.aiquickdraw.com/custom-page/akr/section-images/1757930552966e7f2on7s.png",
+            help="URL of the image to edit"
+        )
+        
+        with st.expander("Preview"):
+            if image_url:
+                st.image(image_url, use_container_width=True)
+        
+        with st.expander("🎛️ Advanced Settings", expanded=True):
+            col_a, col_b = st.columns(2)
+            
+            with col_a:
+                acceleration = st.selectbox(
+                    "Acceleration",
+                    ["none", "regular", "high"],
+                    help="Higher = faster generation"
+                )
+                image_size = st.selectbox(
+                    "Image Size",
+                    ["square", "square_hd", "portrait_4_3", "landscape_4_3"]
+                )
+            
+            with col_b:
+                num_inference_steps = st.slider("Inference Steps", 2, 49, 25)
+                guidance_scale = st.slider("Guidance Scale", 0.0, 20.0, 4.0, 0.1)
+        
+        generate_btn = st.button("🚀 Generate", type="primary", use_container_width=True)
+    
+    with col2:
+        st.subheader("📊 Results")
+        
+        if generate_btn:
+            if not st.session_state.api_key:
+                st.error("⚠️ Please enter API key")
+            elif not prompt:
+                st.error("⚠️ Please enter a prompt")
+            else:
+                with st.spinner("Creating task..."):
+                    input_params = {
+                        "prompt": prompt,
+                        "image_url": image_url,
+                        "acceleration": acceleration,
+                        "image_size": image_size,
+                        "num_inference_steps": num_inference_steps,
+                        "guidance_scale": guidance_scale
+                    }
+                    
+                    result = create_task(st.session_state.api_key, "qwen/image-edit", input_params)
+                    
+                    if result["success"]:
+                        task_id = result["task_id"]
+                        st.session_state.current_task = {
+                            "task_id": task_id,
+                            "model": "qwen/image-edit",
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "status": "waiting"
+                        }
+                        st.session_state.task_history.append(st.session_state.current_task)
+                        st.success("✅ Task created!")
+                        st.code(task_id)
+                    else:
+                        st.error(f"❌ Error: {result['error']}")
+        
+        if st.session_state.current_task:
+            st.markdown("---")
+            task_id = st.session_state.current_task["task_id"]
+            
+            col_check, col_clear = st.columns(2)
+            with col_check:
+                check_btn = st.button("🔄 Check Status", use_container_width=True, key="qwen_check")
+            with col_clear:
+                if st.button("🗑️ Clear", use_container_width=True, key="qwen_clear"):
+                    st.session_state.current_task = None
+                    st.rerun()
+            
+            if check_btn:
+                with st.spinner("Checking..."):
+                    result = check_task_status(st.session_state.api_key, task_id)
+                    
+                    if result["success"]:
+                        task_data = result["data"]
+                        state = task_data["state"]
+                        
+                        if state == "success":
+                            st.success("✅ Completed!")
+                            result_json = json.loads(task_data.get("resultJson", "{}"))
+                            
+                            for idx, url in enumerate(result_json.get("resultUrls", [])):
+                                st.image(url, use_container_width=True)
+
+# Page: Library
+elif page == "📚 Library":
+    st.title("📚 Image Library")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        search_query = st.text_input("🔍 Search images", placeholder="Enter prompt or filename...")
+        search_query = st.text_input("🔍 Search images")
     
     with col2:
         sort_by = st.selectbox("Sort by", ["Newest", "Oldest", "Name"])
@@ -495,215 +776,226 @@ def render_library_page():
     with col3:
         st.write("")
         st.write("")
-        refresh_btn = st.button("🔄 Refresh Library", use_container_width=True)
+        if st.button("🔄 Refresh", use_container_width=True):
+            with st.spinner("Loading..."):
+                st.session_state.library_images = list_gdrive_images()
+                st.session_state.last_refresh = datetime.now()
     
-    if refresh_btn or not st.session_state.library_images:
-        with st.spinner("📂 Loading images from Google Drive..."):
-            st.session_state.library_images = list_gdrive_images()
-    
-    images = st.session_state.library_images
-    
-    # Filter by search query
-    if search_query:
-        images = [img for img in images if search_query.lower() in img['name'].lower()]
-    
-    # Sort images
-    if sort_by == "Oldest":
-        images = sorted(images, key=lambda x: x.get('createdTime', ''))
-    elif sort_by == "Name":
-        images = sorted(images, key=lambda x: x['name'])
-    else:  # Newest
-        images = sorted(images, key=lambda x: x.get('createdTime', ''), reverse=True)
-    
-    if not images:
-        st.info("📭 No images found in your library. Generate some images first!")
+    if not st.session_state.authenticated:
+        st.warning("⚠️ Please authenticate with Google Drive first")
     else:
-        st.write(f"Found **{len(images)}** images")
+        images = st.session_state.library_images
         
-        # Display images in a grid
-        cols = st.columns(4)
-        for idx, img in enumerate(images):
-            col = cols[idx % 4]
+        if search_query:
+            images = [img for img in images if search_query.lower() in img['name'].lower()]
+        
+        if sort_by == "Oldest":
+            images = sorted(images, key=lambda x: x.get('createdTime', ''))
+        elif sort_by == "Name":
+            images = sorted(images, key=lambda x: x['name'])
+        else:
+            images = sorted(images, key=lambda x: x.get('createdTime', ''), reverse=True)
+        
+        if not images:
+            st.info("📭 No images found")
+        else:
+            st.write(f"Found **{len(images)}** images")
             
-            with col:
-                st.markdown(f"""
-                <div class="gallery-item">
-                    <img src="{img['webContentLink']}" width="100%" style="border-radius: 8px;">
-                </div>
-                """, unsafe_allow_html=True)
+            cols = st.columns(4)
+            for idx, img in enumerate(images):
+                col = cols[idx % 4]
                 
-                st.caption(img['name'][:20] + "..." if len(img['name']) > 20 else img['name'])
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if st.button("✏️ Edit", key=f"edit_{img['id']}", use_container_width=True):
-                        st.session_state.selected_image = img
-                        st.session_state.editor_mode = True
-                        st.rerun()
-                
-                with col2:
-                    if st.button("🔗 View", key=f"view_{img['id']}", use_container_width=True):
-                        st.markdown(f"[Open in Google Drive]({img['webContentLink']})")
-                
-                with col3:
-                    if st.button("🗑️ Delete", key=f"delete_{img['id']}", use_container_width=True):
-                        if delete_gdrive_file(img['id']):
-                            st.success("✅ Image deleted")
-                            st.session_state.library_images = [i for i in st.session_state.library_images if i['id'] != img['id']]
+                with col:
+                    st.image(img['webContentLink'], use_container_width=True)
+                    st.caption(img['name'][:20])
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        if st.button("✏️", key=f"edit_{img['id']}", use_container_width=True):
+                            st.session_state.selected_image = img
+                            st.session_state.editor_mode = True
                             st.rerun()
+                    with col2:
+                        st.markdown(f"[🔗](({img['webContentLink']}))")
+                    with col3:
+                        if st.button("🗑️", key=f"del_{img['id']}", use_container_width=True):
+                            if delete_gdrive_file(img['id']):
+                                st.success("✅ Deleted")
+                                st.rerun()
 
-def render_editor_page():
-    """Render the image editor page."""
+# Page: Editor
+elif page == "✏️ Editor":
+    st.title("✏️ Image Editor")
+    
     if not st.session_state.selected_image:
-        st.warning("No image selected. Please select an image from the library first.")
-        return
+        st.info("Select an image from the Library first")
+    else:
+        img = st.session_state.selected_image
+        st.subheader(f"Editing: {img['name']}")
+        
+        img_response = requests.get(img['webContentLink'])
+        image = PILImage.open(io.BytesIO(img_response.content))
+        
+        tab1, tab2, tab3, tab4 = st.tabs(["Adjustments", "Filters", "Transform", "Export"])
+        
+        with tab1:
+            col1, col2 = st.columns(2)
+            with col1:
+                brightness = st.slider("Brightness", -100, 100, 0)
+            with col2:
+                contrast = st.slider("Contrast", -100, 100, 0)
+            
+            if brightness != 0 or contrast != 0:
+                edited = apply_brightness_contrast(image, brightness, contrast)
+                st.image(edited, use_column_width=True)
+        
+        with tab2:
+            col1, col2 = st.columns(2)
+            with col1:
+                blur = st.slider("Blur", 0, 20, 0)
+            with col2:
+                saturation = st.slider("Saturation", -100, 100, 0)
+            
+            if blur > 0 or saturation != 0:
+                edited = image
+                if blur > 0:
+                    edited = apply_blur(edited, blur)
+                if saturation != 0:
+                    edited = apply_saturation(edited, saturation)
+                st.image(edited, use_column_width=True)
+        
+        with tab3:
+            rotation = st.slider("Rotation", -180, 180, 0)
+            if rotation != 0:
+                edited = apply_rotation(image, rotation)
+                st.image(edited, use_column_width=True)
+        
+        with tab4:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("💾 Save to Drive", use_container_width=True):
+                    st.success("✅ Saved")
+            with col2:
+                buf = io.BytesIO()
+                image.save(buf, format="PNG")
+                st.download_button(
+                    "⬇️ Download",
+                    buf.getvalue(),
+                    file_name=img['name'],
+                    mime="image/png",
+                    use_container_width=True
+                )
+
+# Page: Task History
+elif page == "📊 History":
+    st.title("📊 Task History")
     
-    st.header("✏️ Image Editor")
+    if not st.session_state.task_history:
+        st.info("No tasks yet")
+    else:
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            filter_model = st.selectbox("Filter Model", ["All", "bytedance/seedream-v4-edit", "qwen/image-edit"])
+        with col2:
+            filter_status = st.selectbox("Filter Status", ["All", "waiting", "success", "fail"])
+        with col3:
+            st.write("")
+            st.write("")
+            if st.button("🗑️ Clear", use_container_width=True):
+                st.session_state.task_history = []
+                st.rerun()
+        
+        st.markdown("---")
+        
+        filtered = st.session_state.task_history
+        if filter_model != "All":
+            filtered = [t for t in filtered if t.get("model") == filter_model]
+        if filter_status != "All":
+            filtered = [t for t in filtered if t.get("status") == filter_status]
+        
+        for i, task in enumerate(reversed(filtered)):
+            with st.expander(f"Task {len(filtered) - i}: {task['model']} - {task['status'].upper()}"):
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.markdown(f"**Task ID:** `{task['task_id']}`")
+                    st.markdown(f"**Model:** {task['model']}")
+                    st.markdown(f"**Time:** {task['timestamp']}")
+                with col2:
+                    status_emoji = {"waiting": "🟡", "success": "🟢", "fail": "🔴"}
+                    st.markdown(f"### {status_emoji.get(task['status'], '⚪')} {task['status'].upper()}")
+                
+                if st.button(f"🔄 Check", key=f"check_{i}"):
+                    result = check_task_status(st.session_state.api_key, task['task_id'])
+                    if result["success"]:
+                        st.json(result["data"])
+
+# Page: Documentation
+elif page == "📖 Docs":
+    st.title("📖 Documentation")
     
-    img = st.session_state.selected_image
-    st.subheader(f"Editing: {img['name']}")
-    
-    # Load the image
-    img_response = requests.get(img['webContentLink'])
-    image = PILImage.open(io.BytesIO(img_response.content))
-    
-    # Create tabs for different editing options
-    tab1, tab2, tab3, tab4 = st.tabs(["Adjustments", "Filters", "Transform", "AI Edit"])
+    tab1, tab2, tab3 = st.tabs(["SeedDream V4", "Qwen Edit", "API"])
     
     with tab1:
-        st.subheader("Brightness & Contrast")
-        col1, col2 = st.columns(2)
+        st.markdown("""
+        ## SeedDream V4 Edit
         
-        with col1:
-            brightness = st.slider("Brightness", -100, 100, 0)
+        Advanced image editing with multiple inputs and high resolution output.
         
-        with col2:
-            contrast = st.slider("Contrast", -100, 100, 0)
+        ### Features
+        - Multi-image input (up to 10 images)
+        - Multiple aspect ratios
+        - Up to 4K resolution
+        - Batch generation (1-6 images)
         
-        if brightness != 0 or contrast != 0:
-            edited_image = apply_brightness_contrast(image, brightness, contrast)
-            st.image(edited_image, caption="Preview", use_column_width=True)
+        ### Best Practices
+        1. Use detailed, descriptive prompts
+        2. Start with 1K resolution for testing
+        3. Use higher resolutions for final output
+        4. Batch similar prompts together
+        """)
     
     with tab2:
-        st.subheader("Filters")
-        col1, col2 = st.columns(2)
+        st.markdown("""
+        ## Qwen Image Edit
         
-        with col1:
-            blur = st.slider("Blur", 0, 20, 0)
+        Fast and precise image editing with fine-tuned control.
         
-        with col2:
-            saturation = st.slider("Saturation", -100, 100, 0)
+        ### Features
+        - Single image editing
+        - Acceleration options (none, regular, high)
+        - Fine-tuned parameters
+        - Safety checker
         
-        if blur != 0 or saturation != 0:
-            edited_image = image
-            if blur > 0:
-                edited_image = apply_blur(edited_image, blur)
-            if saturation != 0:
-                edited_image = apply_saturation(edited_image, saturation)
-            st.image(edited_image, caption="Preview", use_column_width=True)
+        ### Parameters
+        - **Inference Steps**: 2-49 (higher = better quality)
+        - **Guidance Scale**: 0-20 (how closely to follow prompt)
+        - **Acceleration**: Speed up generation
+        """)
     
     with tab3:
-        st.subheader("Transform")
-        rotation = st.slider("Rotation (degrees)", -180, 180, 0)
+        st.markdown("""
+        ## API Usage
         
-        if rotation != 0:
-            edited_image = apply_rotation(image, rotation)
-            st.image(edited_image, caption="Preview", use_column_width=True)
-    
-    with tab4:
-        st.subheader("AI-Powered Editing")
-        edit_prompt = st.text_area(
-            "Describe the changes you want:",
-            placeholder="E.g., Add a sunset to the background, change colors to warm tones..."
-        )
-        api_key = st.text_input("🔑 API Key", type="password")
+        ### Authentication
+        Use your API key in the Authorization header:
+        ```
+        Authorization: Bearer YOUR_API_KEY
+        ```
         
-        if st.button("🤖 Apply AI Edit"):
-            if not edit_prompt:
-                st.error("Please describe the changes you want.")
-            elif not api_key:
-                st.error("Please provide an API key.")
-            else:
-                edited = edit_image(img['webContentLink'], edit_prompt, api_key)
-                if edited:
-                    st.success("✅ Image edited successfully!")
-                    st.image(edited['url'], caption=f"Prompt: {edit_prompt}", use_column_width=True)
-    
-    # Save and export options
-    st.divider()
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("💾 Save to Google Drive", use_container_width=True):
-            st.success("✅ Image saved to Google Drive")
-    
-    with col2:
-        if st.button("⬇️ Download", use_container_width=True):
-            st.download_button(
-                label="Download Image",
-                data=img_response.content,
-                file_name=img['name'],
-                mime="image/png"
-            )
-    
-    with col3:
-        if st.button("🔙 Back to Library", use_container_width=True):
-            st.session_state.editor_mode = False
-            st.session_state.selected_image = None
-            st.rerun()
+        ### Create Task
+        ```
+        POST /api/v1/jobs/createTask
+        {
+            "model": "bytedance/seedream-v4-edit",
+            "input": {...}
+        }
+        ```
+        
+        ### Check Status
+        ```
+        GET /api/v1/jobs/recordInfo?taskId=TASK_ID
+        ```
+        """)
 
-# ============================================================================
-# Main Application
-# ============================================================================
-
-def main():
-    """Main application logic."""
-    render_header()
-    
-    # Sidebar navigation
-    with st.sidebar:
-        st.header("📋 Navigation")
-        
-        if not st.session_state.authenticated:
-            st.info("🔐 Please authenticate with Google Drive to use all features.")
-            if st.button("🔑 Authenticate with Google Drive", use_container_width=True):
-                authenticate_google_drive()
-        else:
-            st.success("✅ Google Drive Connected")
-            
-            if st.button("📂 Create App Folder", use_container_width=True):
-                folder_id = create_app_folder()
-                if folder_id:
-                    st.success(f"✅ Folder created/found: {folder_id}")
-        
-        st.divider()
-        
-        # Navigation buttons
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("✨ Generate", use_container_width=True):
-                st.session_state.current_page = 'generate'
-                st.rerun()
-        
-        with col2:
-            if st.button("📚 Library", use_container_width=True):
-                st.session_state.current_page = 'library'
-                st.rerun()
-        
-        st.divider()
-        st.markdown("### 📊 Statistics")
-        st.metric("Generated Images", len(st.session_state.generated_images))
-        st.metric("Library Images", len(st.session_state.library_images))
-    
-    # Main content area
-    if st.session_state.editor_mode:
-        render_editor_page()
-    elif st.session_state.current_page == 'library':
-        render_library_page()
-    else:
-        render_generation_page()
-
-if __name__ == "__main__":
-    main()
+st.markdown("---")
+st.markdown("<center>🎨 AI Image Editor Pro | Powered by Streamlit Cloud</center>", unsafe_allow_html=True)
